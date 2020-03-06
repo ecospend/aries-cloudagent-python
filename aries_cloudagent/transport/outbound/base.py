@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Union
 
 from ...utils.stats import Collector
+from ...config.injection_context import InjectionContext
 
 from ..error import TransportError
 from ..wire_format import BaseWireFormat
@@ -17,6 +18,17 @@ class BaseOutboundTransport(ABC):
         """Initialize a `BaseOutboundTransport` instance."""
         self._collector = None
         self._wire_format = wire_format
+        self._context = None
+
+    @property
+    def context(self) -> InjectionContext:
+        """Accessor for InjectionContext for any context injection purposes."""
+        return self._context
+
+    @context.setter
+    def context(self, conn: InjectionContext):
+        """Assign a new InjectionContext to instance."""
+        self._context = conn
 
     @property
     def collector(self) -> Collector:

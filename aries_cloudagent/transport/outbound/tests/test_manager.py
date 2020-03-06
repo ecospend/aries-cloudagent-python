@@ -78,6 +78,7 @@ class TestOutboundTransportManager(AsyncTestCase):
         transport.handle_message.assert_awaited_once_with(
             transport.wire_format.encode_message.return_value, message.target.endpoint
         )
+        assert transport.context == context
         await mgr.stop()
 
         assert mgr.get_running_transport_for_scheme("http") is None
