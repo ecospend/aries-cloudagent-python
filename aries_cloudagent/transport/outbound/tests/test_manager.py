@@ -78,7 +78,6 @@ class TestOutboundTransportManager(AsyncTestCase):
         transport.handle_message.assert_awaited_once_with(
             transport.wire_format.encode_message.return_value, message.target.endpoint
         )
-        assert transport.context == context
         await mgr.stop()
 
         assert mgr.get_running_transport_for_scheme("http") is None
@@ -116,3 +115,14 @@ class TestOutboundTransportManager(AsyncTestCase):
             assert json.loads(queued.payload) == test_payload
             assert queued.retries == test_attempts - 1
             assert queued.state == QueuedOutboundMessage.STATE_PENDING
+    
+    async def test_context_injection(self):
+        context = InjectionContext()
+        context.settings["transport.outbound_configs"] = ["http"]
+        mgr = OutboundTransportManager(context)
+        await mgr.setup()
+        await mgr.start_transport("HttpTransport")
+        transport = mgr.get_transport_instance("HttpTransport")
+        assert not transport == None
+        assert transport.context == context
+        assert transport._context == context

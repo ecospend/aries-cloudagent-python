@@ -165,8 +165,8 @@ class OutboundTransportManager:
         """Start a registered transport."""
         transport = self.registered_transports[transport_id]()
         transport.collector = await self.context.inject(Collector, required=False)
-        transport.context = self.context
         await transport.start()
+        transport.context = self.context
         self.running_transports[transport_id] = transport
 
     async def start(self):
