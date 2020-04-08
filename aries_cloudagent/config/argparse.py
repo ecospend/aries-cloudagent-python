@@ -700,6 +700,14 @@ class TransportGroup(ArgumentGroup):
             to hold messages for delivery to agents without an endpoint. This\
             option will require additional memory to store messages in the queue.",
         )
+        parser.add_argument(
+            "--push-api-key",
+            dest="push_api_key",
+            type=str,
+            help="Defines the push notification api key for push notification\
+            outbound transport for connections which are use push transport\
+            chanel.",
+        )
 
     def get_settings(self, args: Namespace):
         """Extract transport settings."""
@@ -707,6 +715,7 @@ class TransportGroup(ArgumentGroup):
         settings["transport.inbound_configs"] = args.inbound_transports
         settings["transport.outbound_configs"] = args.outbound_transports
         settings["transport.enable_undelivered_queue"] = args.enable_undelivered_queue
+        settings["transport.push_api_key"] = args.push_api_key
 
         if args.label:
             settings["default_label"] = args.label
