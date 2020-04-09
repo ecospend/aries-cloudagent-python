@@ -55,6 +55,8 @@ class PickupManager:
         self,
         message: dict,
         verkey: str,
+        target_did: str = None,
+        endpoint: str = None
     ):
         """
         Create a pickup message and stores into the wallet.
@@ -62,6 +64,7 @@ class PickupManager:
         Args:
             message: pickup message
             verkey: recipient verkey for stored message
+            target_did: did of the recipient
 
         Returns:
             Stored message id
@@ -70,6 +73,22 @@ class PickupManager:
 
         stored_message = PickupMessage(verkey=verkey, message=message)
         await stored_message.save(context=self.context)
+
+        if target_did:
+            responder: BaseResponder = await self._context.inject(
+                    BaseResponder, required=False
+                )
+
+            await responder.send_webhook(
+                "pickup_message",
+                {
+                    "target_did": target_did,
+                    "message_id": stored_message.message_id,
+                    "content": "message_stored",
+                    "state": "stored",
+                    "endpoint": endpoint
+                },
+            )
 
         return stored_message
 
