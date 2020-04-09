@@ -11,7 +11,7 @@ from aiohttp import web, WSMsgType
 from ....config.injection_context import InjectionContext
 
 from ..push import PushTransport
-from ..base import OutboundTransportError
+from ..base import OutboundTransportError, PushDataSizeExceedError
 
 
 class TestPushTransport(AsyncTestCase):
@@ -52,5 +52,5 @@ class TestPushTransport(AsyncTestCase):
                 endpoint="push://TEST_ID"
             ), 5.0)
             assert self.message_results == [{}]
-        except OutboundTransportError as e:
+        except PushDataSizeExceedError as e:
             assert str(e) == "Data size exceed push notification limits"

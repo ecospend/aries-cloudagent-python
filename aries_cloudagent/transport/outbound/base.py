@@ -75,6 +75,10 @@ class OutboundTransportError(TransportError):
     """Generic outbound transport error."""
 
 
+class PushDataSizeExceedError(OutboundTransportError):
+    """Push transport data size exceed error."""
+
+
 class OutboundTransportRegistrationError(OutboundTransportError):
     """Outbound transport registration error."""
 

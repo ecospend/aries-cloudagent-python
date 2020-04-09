@@ -11,7 +11,7 @@ from ...config.injection_context import InjectionContext
 
 from ..stats import StatsTracer
 
-from .base import BaseOutboundTransport, OutboundTransportError
+from .base import BaseOutboundTransport, OutboundTransportError, PushDataSizeExceedError
 
 
 class PushTransport(BaseOutboundTransport):
@@ -60,11 +60,10 @@ class PushTransport(BaseOutboundTransport):
         push_id = endpoint_args.netloc
 
         payload_size = len(payload)
-
-        if(payload_size < 3500):
-            label = context.settings.get(
+        label = context.settings.get(
                 "default_label"
                 )
+        if(payload_size < 3500):
             agent_message = {
                 "Data": {
                             "type": "agent_message",
@@ -85,4 +84,4 @@ class PushTransport(BaseOutboundTransport):
             if result['success'] < 1:
                 raise OutboundTransportError("Push message couldn't be delivered")
         else:
-            raise OutboundTransportError("Data size exceed push notification limits")
+            raise PushDataSizeExceedError("Data size exceed push notification limits")
