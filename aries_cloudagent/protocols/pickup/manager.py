@@ -1,6 +1,7 @@
 """Classes to manage pickup messages."""
 
 import logging
+import json
 from typing import Sequence
 
 from ...config.injection_context import InjectionContext
@@ -324,7 +325,7 @@ class PickupManager:
                 stored_message = record.serialize()
                 pickup_message = PickupMessageInner(
                     id=stored_message.get('message_id'),
-                    message=stored_message.get('message')
+                    message=json.dumps(stored_message.get('message'))
                 )
                 response.messages_attach.append(pickup_message)
 
