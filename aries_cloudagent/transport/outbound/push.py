@@ -79,7 +79,8 @@ class PushTransport(BaseOutboundTransport):
             }
             result = self.push_service.notify_single_device(
                 registration_id=push_id,
-                data_message=agent_message
+                data_message=agent_message,
+                content_available=True
             )
             if result['success'] < 1:
                 raise OutboundTransportError("Push message couldn't be delivered")
