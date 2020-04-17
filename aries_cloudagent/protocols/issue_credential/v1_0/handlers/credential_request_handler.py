@@ -1,6 +1,5 @@
 """Credential request message handler."""
 
-
 from .....messaging.base_handler import (
     BaseHandler,
     BaseResponder,
@@ -11,6 +10,8 @@ from .....messaging.base_handler import (
 from ..manager import CredentialManager
 from ..messages.credential_request import CredentialRequest
 from ..messages.credential_proposal import CredentialProposal
+
+from .....utils.tracing import trace_event, get_timer
 
 
 class CredentialRequestHandler(BaseHandler):
@@ -25,11 +26,13 @@ class CredentialRequestHandler(BaseHandler):
             responder: responder callback
 
         """
+        r_time = get_timer()
+
         self._logger.debug("CredentialRequestHandler called with context %s", context)
         assert isinstance(context.message, CredentialRequest)
         self._logger.info(
             "Received credential request message: %s",
-            context.message.serialize(as_string=True)
+            context.message.serialize(as_string=True),
         )
 
         if not context.connection_ready:
@@ -38,11 +41,18 @@ class CredentialRequestHandler(BaseHandler):
         credential_manager = CredentialManager(context)
         cred_exchange_rec = await credential_manager.receive_request()
 
+        r_time = trace_event(
+            context.settings,
+            context.message,
+            outcome="CredentialRequestHandler.handle.END",
+            perf_counter=r_time,
+        )
+
         # If auto_issue is enabled, respond immediately
         if cred_exchange_rec.auto_issue:
             if (
-                cred_exchange_rec.credential_proposal_dict and
-                "credential_proposal" in cred_exchange_rec.credential_proposal_dict
+                cred_exchange_rec.credential_proposal_dict
+                and "credential_proposal" in cred_exchange_rec.credential_proposal_dict
             ):
                 (
                     cred_exchange_rec,
@@ -56,6 +66,13 @@ class CredentialRequestHandler(BaseHandler):
                 )
 
                 await responder.send_reply(credential_issue_message)
+
+                trace_event(
+                    context.settings,
+                    credential_issue_message,
+                    outcome="CredentialRequestHandler.issue.END",
+                    perf_counter=r_time,
+                )
             else:
                 self._logger.warning(
                     "Operation set for auto-issue but credential exchange record "

@@ -6,11 +6,11 @@ from marshmallow import fields
 from marshmallow.validate import OneOf
 
 from .....config.injection_context import InjectionContext
-from .....messaging.models.base_record import BaseRecord, BaseRecordSchema
+from .....messaging.models.base_record import BaseExchangeRecord, BaseExchangeSchema
 from .....messaging.valid import INDY_CRED_DEF_ID, INDY_SCHEMA_ID, UUIDFour
 
 
-class V10CredentialExchange(BaseRecord):
+class V10CredentialExchange(BaseExchangeRecord):
     """Represents an Aries#0036 credential exchange."""
 
     class Meta:
@@ -57,13 +57,17 @@ class V10CredentialExchange(BaseRecord):
         credential_id: str = None,
         raw_credential: dict = None,  # indy credential as received
         credential: dict = None,  # indy credential as stored
+        revoc_reg_id: str = None,
+        revocation_id: str = None,
         auto_offer: bool = False,
         auto_issue: bool = False,
+        auto_remove: bool = True,
         error_msg: str = None,
+        trace: bool = False,
         **kwargs,
     ):
         """Initialize a new V10CredentialExchange."""
-        super().__init__(credential_exchange_id, state, **kwargs)
+        super().__init__(credential_exchange_id, state, trace=trace, **kwargs)
         self._id = credential_exchange_id
         self.connection_id = connection_id
         self.thread_id = thread_id
@@ -80,9 +84,13 @@ class V10CredentialExchange(BaseRecord):
         self.credential_id = credential_id
         self.raw_credential = raw_credential
         self.credential = credential
+        self.revoc_reg_id = revoc_reg_id
+        self.revocation_id = revocation_id
         self.auto_offer = auto_offer
         self.auto_issue = auto_issue
+        self.auto_remove = auto_remove
         self.error_msg = error_msg
+        self.trace = trace
 
     @property
     def credential_exchange_id(self) -> str:
@@ -103,6 +111,7 @@ class V10CredentialExchange(BaseRecord):
                 "error_msg",
                 "auto_offer",
                 "auto_issue",
+                "auto_remove",
                 "raw_credential",
                 "credential",
                 "parent_thread_id",
@@ -110,8 +119,11 @@ class V10CredentialExchange(BaseRecord):
                 "credential_definition_id",
                 "schema_id",
                 "credential_id",
+                "revoc_reg_id",
+                "revocation_id",
                 "role",
                 "state",
+                "trace",
             )
         }
 
@@ -136,7 +148,7 @@ class V10CredentialExchange(BaseRecord):
         return super().__eq__(other)
 
 
-class V10CredentialExchangeSchema(BaseRecordSchema):
+class V10CredentialExchangeSchema(BaseExchangeSchema):
     """Schema to allow serialization/deserialization of credential exchange records."""
 
     class Meta:
@@ -213,8 +225,22 @@ class V10CredentialExchangeSchema(BaseRecordSchema):
         description="Issuer choice to issue to request in this credential exchange",
         example=False,
     )
+    auto_remove = fields.Bool(
+        required=False,
+        default=True,
+        description=(
+            "Issuer choice to remove this credential exchange record when complete"
+        ),
+        example=False,
+    )
     error_msg = fields.Str(
         required=False,
         description="Error message",
         example="credential definition identifier is not set in proposal",
+    )
+    revoc_reg_id = fields.Str(
+        required=False, description="Revocation registry identifier"
+    )
+    revocation_id = fields.Str(
+        required=False, description="Credential identifier within revocation registry"
     )

@@ -8,6 +8,7 @@ from typing import Type
 
 from .error import ArgsParseError
 from .util import ByteSize
+from ..utils.tracing import trace_event
 
 CAT_PROVISION = "general"
 CAT_START = "start"
@@ -178,7 +179,7 @@ class DebugGroup(ArgumentGroup):
             action="store_true",
             help="Enables a remote debugging service that can be accessed\
             using ptvsd for Visual Studio Code. The framework will wait\
-            for the debugger to connect at start-up. Default: false."
+            for the debugger to connect at start-up. Default: false.",
         )
         parser.add_argument(
             "--debug-seed",
@@ -215,30 +216,30 @@ class DebugGroup(ArgumentGroup):
             dest="invite_role",
             type=str,
             metavar="<role>",
-            help="Specify the role of the generated invitation."
+            help="Specify the role of the generated invitation.",
         )
         parser.add_argument(
             "--invite-label",
             dest="invite_label",
             type=str,
             metavar="<label>",
-            help="Specify the label of the generated invitation."
+            help="Specify the label of the generated invitation.",
         )
         parser.add_argument(
             "--invite-multi-use",
             action="store_true",
-            help="Flag specifying the generated invite should be multi-use."
+            help="Flag specifying the generated invite should be multi-use.",
         )
         parser.add_argument(
             "--invite-public",
             action="store_true",
-            help="Flag specifying the generated invite should be public."
+            help="Flag specifying the generated invite should be public.",
         )
         parser.add_argument(
             "--test-suite-endpoint",
             type=str,
             metavar="<endpoint>",
-            help="URL endpoint for sending messages to the test suite agent."
+            help="URL endpoint for sending messages to the test suite agent.",
         )
 
         parser.add_argument(
@@ -435,9 +436,9 @@ class LedgerGroup(ArgumentGroup):
             type=str,
             dest="genesis_transactions",
             metavar="<genesis-transactions>",
-            help="Specifies the genesis transactions to use to connect to\
+            help='Specifies the genesis transactions to use to connect to\
             an Hyperledger Indy ledger. The transactions are provided as string\
-            of JSON e.g. '{\"reqSignature\":{},\"txn\":{\"data\":{\"d... <snip>'",
+            of JSON e.g. \'{"reqSignature":{},"txn":{"data":{"d... <snip>\'',
         )
         parser.add_argument(
             "--genesis-file",
@@ -537,7 +538,7 @@ class ProtocolGroup(ArgumentGroup):
             "--invite-base-url",
             type=str,
             metavar="<base-url>",
-            help="Base URL to use when formatting connection invitations in URL format."
+            help="Base URL to use when formatting connection invitations in URL format.",
         )
         parser.add_argument(
             "--monitor-ping",
@@ -562,9 +563,30 @@ class ProtocolGroup(ArgumentGroup):
             help="Write timing information to a given log file.",
         )
         parser.add_argument(
+            "--trace", action="store_true", help="Generate tracing events.",
+        )
+        parser.add_argument(
+            "--trace-target",
+            type=str,
+            metavar="<trace-target>",
+            help='Target for trace events ("log", "message", or http endpoint).',
+        )
+        parser.add_argument(
+            "--trace-tag",
+            type=str,
+            metavar="<trace-tag>",
+            help="Tag to be included when logging events.",
+        )
+        parser.add_argument(
+            "--trace-label",
+            type=str,
+            metavar="<trace-label>",
+            help="Label (agent name) used logging events.",
+        )
+        parser.add_argument(
             "--preserve-exchange-records",
             action="store_true",
-            help="Keep credential exchange records after exchange has completed."
+            help="Keep credential exchange records after exchange has completed.",
         )
 
     def get_settings(self, args: Namespace) -> dict:
@@ -582,6 +604,36 @@ class ProtocolGroup(ArgumentGroup):
             settings["timing.enabled"] = True
         if args.timing_log:
             settings["timing.log_file"] = args.timing_log
+        if args.trace:
+            # note that you can configure tracing without actually enabling it
+            # this is to allow message- or exchange-specific tracing (vs global)
+            settings["trace.enabled"] = True
+            settings["trace.target"] = "log"
+            settings["trace.tag"] = ""
+        if args.trace_target:
+            settings["trace.target"] = args.trace_target
+        if args.trace_tag:
+            settings["trace.tag"] = args.trace_tag
+        if args.trace_label:
+            settings["trace.label"] = args.trace_label
+        elif args.label:
+            settings["trace.label"] = args.label
+        else:
+            settings["trace.label"] = "aca-py.agent"
+        if settings.get("trace.enabled") or settings.get("trace.target"):
+            # make sure we can trace to the configured target
+            # (target can be set even if tracing is off)
+            try:
+                trace_event(
+                    settings,
+                    None,
+                    handler="ArgParse",
+                    outcome="Successfully_configured_aca-py",
+                    raise_errors=True,
+                    force_trace=True,
+                )
+            except Exception as e:
+                raise ArgsParseError("Error writing trace event " + str(e))
         if args.preserve_exchange_records:
             settings["preserve_exchange_records"] = True
         return settings
@@ -718,11 +770,11 @@ class WalletGroup(ArgumentGroup):
             "--wallet-storage-creds",
             type=str,
             metavar="<storage-creds>",
-            help="Specify the storage credentials to use for the wallet.\
-            This is required if you are for using 'postgres_storage' wallet\
-            For example, '{\"account\":\"postgres\",\"password\":\
-            \"mysecretpassword\",\"admin_account\":\"postgres\",\"admin_password\":\
-            \"mysecretpassword\"}'",
+            help='Specify the storage credentials to use for the wallet.\
+            This is required if you are for using \'postgres_storage\' wallet\
+            For example, \'{"account":"postgres","password":\
+            "mysecretpassword","admin_account":"postgres","admin_password":\
+            "mysecretpassword"}\'',
         )
         parser.add_argument(
             "--replace-public-did",
