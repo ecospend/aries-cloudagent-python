@@ -16,7 +16,7 @@ class PickupMessageInner(BaseModel):
     def __init__(
         self,
         id: str,
-        message: dict,
+        message: str,
         **kwargs
     ):
         """
@@ -43,6 +43,6 @@ class PickupMessageInnerSchema(BaseModelSchema):
     id = fields.Str(
         description="Pickup message id", required=True, example="123123123"
     )
-    message = fields.Dict(
+    message = fields.Str(
         description="Pickup message content", required=False
     )

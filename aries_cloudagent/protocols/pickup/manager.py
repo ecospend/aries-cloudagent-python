@@ -202,7 +202,7 @@ class PickupManager:
         for stored_message in results:
             pickup_message = PickupMessageInner(
                 id=stored_message.get('message_id'),
-                message=stored_message.get('message')
+                message=json.dumps(stored_message.get('message'))
             )
             response.messages_attach.append(pickup_message)
         return response
