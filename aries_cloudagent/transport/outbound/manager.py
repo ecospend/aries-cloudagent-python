@@ -25,6 +25,8 @@ from .base import (
 )
 from .message import OutboundMessage
 
+from ...protocols.pickup.manager import PickupManager
+
 LOGGER = logging.getLogger(__name__)
 MODULE_BASE_PATH = "aries_cloudagent.transport.outbound"
 
@@ -434,7 +436,19 @@ class OutboundTransportManager:
         if completed.exc_info:
             queued.error = completed.exc_info
 
-            if queued.retries:
+            if queued.transport_id == "PushTransport":
+                pickup_manager = PickupManager(self.context)
+                queued.task = self.task_queue.run(
+                    pickup_manager.store_pickup_message(
+                        message=json.loads(queued.payload),
+                        verkey=queued.target.recipient_keys[0],
+                        target_did=queued.target.did,
+                        endpoint=queued.target.endpoint
+                    )
+                )
+                queued.error = None
+                queued.state = QueuedOutboundMessage.STATE_DONE
+            elif queued.retries:
                 LOGGER.error(
                     ">>> Posting error: %s; Re-queue failed message ...",
                     queued.endpoint,
@@ -447,6 +461,16 @@ class OutboundTransportManager:
                     "Outbound message could not be delivered", exc_info=queued.error,
                 )
                 LOGGER.error(">>> NOT Re-queued, state is DONE, failed to deliver msg.")
+                pickup_manager = PickupManager(self.context)
+                queued.task = self.task_queue.run(
+                        pickup_manager.store_pickup_message(
+                            message=json.loads(queued.payload),
+                            verkey=queued.target.recipient_keys[0],
+                            target_did=queued.target.did,
+                            endpoint=queued.target.endpoint
+                        )
+                    )
+                queued.error = None
                 queued.state = QueuedOutboundMessage.STATE_DONE
         else:
             queued.error = None
