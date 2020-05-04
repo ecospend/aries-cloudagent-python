@@ -66,7 +66,8 @@ class PickupMessage(BaseRecord):
             for prop in (
                 "target_url",
                 "verkey",
-                "message"
+                "message",
+                "state"
             )
         }
 
@@ -84,6 +85,13 @@ class PickupMessage(BaseRecord):
 
         return records
 
+    async def set_delivered(
+        self, context: InjectionContext
+    ):
+        """Set message status to delivered."""
+
+        self.state = PickupMessage.STATE_MESSAGE_SENT
+        await self.save(context=context)
 
 class PickupMessageSchema(BaseRecordSchema):
     """Schema to allow serialization/deserialization of pickup messages."""

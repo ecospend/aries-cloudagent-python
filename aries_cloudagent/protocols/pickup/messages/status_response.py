@@ -25,6 +25,7 @@ class StatusResponse(AgentMessage):
     def __init__(
         self,
         message_count: int = None,
+        total_size: int = None,
         **kwargs
     ):
         """
@@ -36,6 +37,7 @@ class StatusResponse(AgentMessage):
         """
         super(StatusResponse, self).__init__(**kwargs)
         self.message_count = message_count
+        self.total_size = total_size
 
 
 class StatusResponseSchema(AgentMessageSchema):
@@ -47,3 +49,4 @@ class StatusResponseSchema(AgentMessageSchema):
         model_class = StatusResponse
 
     message_count = fields.Int(required=True)
+    total_size = fields.Int(required=False)
