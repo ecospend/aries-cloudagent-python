@@ -205,7 +205,7 @@ class PickupManager:
                 message=json.dumps(stored_message.get('message'))
             )
             response.messages_attach.append(pickup_message)
-        return response
+        return response, records
 
     async def create_status_request(
         self,
@@ -253,8 +253,11 @@ class PickupManager:
         verkey = self.context.message_receipt.sender_verkey
         records = await PickupMessage.retrieve_by_verkey(self.context, verkey)
 
+        undelivered_records = [rec for rec in records if rec.state == PickupMessage.STATE_MESSAGE_WAIT]
+
         response = StatusResponse()
-        response.message_count = len(records)
+        response.message_count = len(undelivered_records)
+        response.total_size = len(records)
 
         return response
 
@@ -315,6 +318,7 @@ class PickupManager:
         response = ListPickupResponse()
 
         verkey = self.context.message_receipt.sender_verkey
+        messages = []
 
         for message_id in list_pickup_request.message_ids:
             try:
@@ -323,10 +327,11 @@ class PickupManager:
                 record = None
             if record and record.verkey == verkey:
                 stored_message = record.serialize()
+                messages.append(record)
                 pickup_message = PickupMessageInner(
                     id=stored_message.get('message_id'),
                     message=json.dumps(stored_message.get('message'))
                 )
                 response.messages_attach.append(pickup_message)
 
-        return response
+        return response, messages

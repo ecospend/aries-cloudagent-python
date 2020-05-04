@@ -33,5 +33,7 @@ class ListPickupHandler(BaseHandler):
             raise HandlerException("No connection established for list pickup request")
 
         pickup_manager = PickupManager(context)
-        response = await pickup_manager.receive_list_request()
+        response, pickup_messages = await pickup_manager.receive_list_request()
         await responder.send_reply(response)
+        for message in pickup_messages :
+            await message.set_delivered(context=context)
