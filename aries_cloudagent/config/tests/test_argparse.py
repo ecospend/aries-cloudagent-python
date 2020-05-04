@@ -42,8 +42,6 @@ class TestArgParse(AsyncTestCase):
                 "http",
                 "--outbound-transport",
                 "push",
-                "--push-api-key",
-                "api-key_test_value"
             ]
         )
 
@@ -54,7 +52,6 @@ class TestArgParse(AsyncTestCase):
 
         assert settings.get("transport.inbound_configs") == [["http", "0.0.0.0", "80"]]
         assert settings.get("transport.outbound_configs") == ["http", "push"]
-        assert settings.get("transport.push_api_key") == "api-key_test_value"
 
     def test_bytesize(self):
         bs = ByteSize()

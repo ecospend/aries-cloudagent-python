@@ -2,6 +2,9 @@
 
 import logging
 import json
+import firebase_admin
+from firebase_admin import credentials, messaging
+from firebase_admin.exceptions import InvalidArgumentError, FirebaseError
 from typing import Union
 from pyfcm import FCMNotification
 from urllib.parse import urlparse
@@ -22,7 +25,18 @@ class PushTransport(BaseOutboundTransport):
     def __init__(self) -> None:
         """Initialize an `PushTransport` instance."""
         super(PushTransport, self).__init__()
-        self.push_service = None
+        firebase_admin.initialize_app()
+        self.apns_config = messaging.APNSConfig(
+            headers = {
+                "apns-priority" : "10",
+                "apns-push-type" : "background"
+            },
+            payload = messaging.APNSPayload(
+                aps = messaging.Aps(
+                    content_available = "1"
+                )
+            )
+        )
         self.logger = logging.getLogger(__name__)
 
     async def start(self):
@@ -50,12 +64,6 @@ class PushTransport(BaseOutboundTransport):
             endpoint: URI endpoint for delivery
         """
 
-        if not self.push_service:
-            self.push_key = context.settings.get(
-                "transport.push_api_key"
-                )
-            self.push_service = FCMNotification(api_key=self.push_key)
-
         endpoint_args = urlparse(endpoint)
         push_id = endpoint_args.netloc
 
@@ -64,25 +72,25 @@ class PushTransport(BaseOutboundTransport):
                 "default_label"
                 )
         if(payload_size < 3500):
-            agent_message = {
-                "Data": {
+            data_message = {
                             "type": "agent_message",
-                            "message": json.loads(payload),
-                            "message_type": "direct"
-                },
-                "Aps": {
-                    "alert": "You have new message from {}".format(label),
-                    "sound": "default",
-                    "badge": 0,
-                    "title": "{}".format(label)
-                }
+                            "agent_message_type": "direct",
+                            "message": payload.decode("utf-8")
             }
-            result = self.push_service.notify_single_device(
-                registration_id=push_id,
-                data_message=agent_message,
-                content_available=True
+            agent_message = messaging.Message(
+                data = data_message,
+                apns = self.apns_config,
+                token = push_id
             )
-            if result['success'] < 1:
+            try:
+                result = messaging.send(message=agent_message)
+            except InvalidArgumentError:
+                raise OutboundTransportError("Push message couldn't be delivered")
+            except FirebaseError as firebase_error:
+                raise OutboundTransportError(str(api_error))
+            except Exception as api_error:
+                raise OutboundTransportError(str(api_error))
+            if not result:
                 raise OutboundTransportError("Push message couldn't be delivered")
         else:
             raise PushDataSizeExceedError("Data size exceed push notification limits")
