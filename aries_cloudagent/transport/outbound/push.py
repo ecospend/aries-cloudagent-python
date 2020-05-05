@@ -1,12 +1,10 @@
 """Push notification outbound transport."""
 
 import logging
-import json
 import firebase_admin
-from firebase_admin import credentials, messaging
+from firebase_admin import messaging
 from firebase_admin.exceptions import InvalidArgumentError, FirebaseError
 from typing import Union
-from pyfcm import FCMNotification
 from urllib.parse import urlparse
 
 
@@ -26,14 +24,15 @@ class PushTransport(BaseOutboundTransport):
         """Initialize an `PushTransport` instance."""
         super(PushTransport, self).__init__()
         firebase_admin.initialize_app()
+        self.dry_run = False
         self.apns_config = messaging.APNSConfig(
-            headers = {
-                "apns-priority" : "10",
-                "apns-push-type" : "background"
+            headers={
+                "apns-priority": "10",
+                "apns-push-type": "background"
             },
-            payload = messaging.APNSPayload(
-                aps = messaging.Aps(
-                    content_available = "1"
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    content_available=True
                 )
             )
         )
@@ -68,26 +67,23 @@ class PushTransport(BaseOutboundTransport):
         push_id = endpoint_args.netloc
 
         payload_size = len(payload)
-        label = context.settings.get(
-                "default_label"
-                )
         if(payload_size < 3500):
             data_message = {
                             "type": "agent_message",
                             "agent_message_type": "direct",
-                            "message": payload.decode("utf-8")
+                            "message": payload.decode('utf-8')
             }
             agent_message = messaging.Message(
-                data = data_message,
-                apns = self.apns_config,
-                token = push_id
+                data=data_message,
+                apns=self.apns_config,
+                token=push_id
             )
             try:
-                result = messaging.send(message=agent_message)
+                result = messaging.send(message=agent_message, dry_run=self.dry_run)
             except InvalidArgumentError:
                 raise OutboundTransportError("Push message couldn't be delivered")
             except FirebaseError as firebase_error:
-                raise OutboundTransportError(str(api_error))
+                raise OutboundTransportError(str(firebase_error))
             except Exception as api_error:
                 raise OutboundTransportError(str(api_error))
             if not result:
