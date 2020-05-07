@@ -192,7 +192,8 @@ class PickupManager:
 
         records = await PickupMessage.retrieve_by_verkey(self.context, verkey)
 
-        results = [record.serialize() for record in records]
+        undelivered_records = [rec for rec in records if rec.state == PickupMessage.STATE_MESSAGE_WAIT]
+        results = [record.serialize() for record in undelivered_records]
 
         results.sort(key=self.pickup_message_sort)
 
@@ -205,7 +206,7 @@ class PickupManager:
                 message=json.dumps(stored_message.get('message'))
             )
             response.messages_attach.append(pickup_message)
-        return response, records
+        return response, undelivered_records
 
     async def create_status_request(
         self,
