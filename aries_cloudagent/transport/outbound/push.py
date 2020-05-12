@@ -76,7 +76,10 @@ class PushTransport(BaseOutboundTransport):
             agent_message = messaging.Message(
                 data=data_message,
                 apns=self.apns_config,
-                token=push_id
+                token=push_id,
+                notification=messaging.Notification(
+                    body="You've received new message"
+                )
             )
             try:
                 result = messaging.send(message=agent_message, dry_run=self.dry_run)
