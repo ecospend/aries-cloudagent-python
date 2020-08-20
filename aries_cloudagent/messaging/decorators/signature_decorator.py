@@ -1,11 +1,10 @@
 """Model and schema for working with field signatures within message bodies."""
 
-
 import json
 import struct
 import time
 
-from marshmallow import fields
+from marshmallow import EXCLUDE, fields
 
 from ...wallet.base import BaseWallet
 from ...wallet.util import b64_to_bytes, bytes_to_b64
@@ -91,8 +90,8 @@ class SignatureDecorator(BaseModel):
 
         """
         msg_bin = b64_to_bytes(self.sig_data, urlsafe=True)
-        timestamp, = struct.unpack_from("!Q", msg_bin, 0)
-        return json.loads(msg_bin[8:]), timestamp
+        (timestamp,) = struct.unpack_from("!Q", msg_bin, 0)
+        return (json.loads(msg_bin[8:]), timestamp)
 
     async def verify(self, wallet: BaseWallet) -> bool:
         """
@@ -128,12 +127,15 @@ class SignatureDecoratorSchema(BaseModelSchema):
         """SignatureDecoratorSchema metadata."""
 
         model_class = SignatureDecorator
+        unknown = EXCLUDE
 
     signature_type = fields.Str(
         data_key="@type",
         required=True,
         description="Signature type",
-        example="did:sov:BzCbsNYhMrjHiqZDTUASHg;spec/signature/1.0/ed25519Sha512_single"
+        example=(
+            "did:sov:BzCbsNYhMrjHiqZDTUASHg;" "spec/signature/1.0/ed25519Sha512_single"
+        ),
     )
     signature = fields.Str(
         required=True,
@@ -142,15 +144,11 @@ class SignatureDecoratorSchema(BaseModelSchema):
             "FpSxSohK3rhn9QhcJStUNRYUvD8OxLuwda3yhzHkWbZ0VxIbI-"
             "l4mKOz7AmkMHDj2IgDEa1-GCFfWXNl96a7Bg=="
         ),
-        validate=Base64URL()
+        validate=Base64URL(),
     )
     sig_data = fields.Str(
-        required=True,
-        description="Signature data, base64url-encoded",
-        **BASE64URL
+        required=True, description="Signature data, base64url-encoded", **BASE64URL
     )
     signer = fields.Str(
-        required=True,
-        description="Signer verification key",
-        **INDY_RAW_PUBLIC_KEY
+        required=True, description="Signer verification key", **INDY_RAW_PUBLIC_KEY
     )

@@ -1,10 +1,11 @@
 """Agent message base class and schema."""
 
 from collections import OrderedDict
-from typing import Union
+from typing import Mapping, Union
 import uuid
 
 from marshmallow import (
+    EXCLUDE,
     fields,
     pre_load,
     post_load,
@@ -19,6 +20,12 @@ from .decorators.base import BaseDecoratorSet
 from .decorators.default import DecoratorSet
 from .decorators.signature_decorator import SignatureDecorator
 from .decorators.thread_decorator import ThreadDecorator
+from .decorators.trace_decorator import (
+    TraceDecorator,
+    TraceReport,
+    TRACE_MESSAGE_TARGET,
+    TRACE_LOG_TARGET,
+)
 from .models.base import (
     BaseModel,
     BaseModelError,
@@ -55,7 +62,7 @@ class AgentMessage(BaseModel):
             TypeError: If message type is missing on subclass Meta class
 
         """
-        super(AgentMessage, self).__init__()
+        super().__init__()
         if _id:
             self._message_id = _id
             self._message_new_id = False
@@ -259,7 +266,10 @@ class AgentMessage(BaseModel):
         Args:
             val: ThreadDecorator or dict to set as the thread
         """
-        self._decorators["thread"] = val
+        if val is None:
+            self._decorators.pop("thread", None)
+        else:
+            self._decorators["thread"] = val
 
     @property
     def _thread_id(self) -> str:
@@ -289,7 +299,88 @@ class AgentMessage(BaseModel):
             thid: The thread identifier
             pthid: The parent thread identifier
         """
-        self._thread = ThreadDecorator(thid=thid, pthid=pthid)
+        if thid or pthid:
+            self._thread = ThreadDecorator(thid=thid, pthid=pthid)
+        else:
+            self._thread = None
+
+    @property
+    def _trace(self) -> TraceDecorator:
+        """
+        Accessor for the message's trace decorator.
+
+        Returns:
+            The TraceDecorator for this message
+
+        """
+        return self._decorators.get("trace")
+
+    @_trace.setter
+    def _trace(self, val: Union[TraceDecorator, dict]):
+        """
+        Setter for the message's trace decorator.
+
+        Args:
+            val: TraceDecorator or dict to set as the trace
+        """
+        if val is None:
+            self._decorators.pop("trace", None)
+        else:
+            self._decorators["trace"] = val
+
+    def assign_trace_from(self, msg: "AgentMessage"):
+        """
+        Copy trace information from a previous message.
+
+        Args:
+            msg: The received message containing optional trace information
+        """
+        if msg and msg._trace:
+            # ignore if not a valid type
+            if isinstance(msg._trace, TraceDecorator) or isinstance(msg._trace, dict):
+                self._trace = msg._trace
+
+    def assign_trace_decorator(self, context, trace):
+        """
+        Copy trace from a json structure.
+
+        Args:
+            trace: string containing trace json stucture
+        """
+        if trace:
+            self.add_trace_decorator(
+                target=context.get("trace.target") if context else TRACE_LOG_TARGET,
+                full_thread=True,
+            )
+
+    def add_trace_decorator(
+        self, target: str = TRACE_LOG_TARGET, full_thread: bool = True
+    ):
+        """
+        Create a new trace decorator.
+
+        Args:
+            target: The trace target
+            full_thread: Full thread flag
+        """
+        if self._trace:
+            # don't replace if there is already a trace decorator
+            # (potentially holding trace reports already)
+            self._trace._target = target
+            self._trace._full_thread = full_thread
+        else:
+            self._trace = TraceDecorator(target=target, full_thread=full_thread)
+
+    def add_trace_report(self, val: Union[TraceReport, dict]):
+        """
+        Append a new trace report.
+
+        Args:
+            val: The trace target
+        """
+        if not self._trace:
+            self.add_trace_decorator(target=TRACE_MESSAGE_TARGET, full_thread=True)
+        self._trace.append_trace_report(val)
 
 
 class AgentMessageSchema(BaseModelSchema):
@@ -300,6 +391,7 @@ class AgentMessageSchema(BaseModelSchema):
 
         model_class = None
         signed_fields = None
+        unknown = EXCLUDE
 
     # Avoid clobbering keywords
     _type = fields.Str(
@@ -324,19 +416,13 @@ class AgentMessageSchema(BaseModelSchema):
             TypeError: If Meta.model_class has not been set
 
         """
-        super(AgentMessageSchema, self).__init__(*args, **kwargs)
-        if not self.Meta.model_class:
-            raise TypeError(
-                "Can't instantiate abstract class {} with no model_class".format(
-                    self.__class__.__name__
-                )
-            )
+        super().__init__(*args, **kwargs)
         self._decorators = DecoratorSet()
         self._decorators_dict = None
         self._signatures = {}
 
     @pre_load
-    def extract_decorators(self, data, **kwargs):
+    def extract_decorators(self, data: Mapping, **kwargs):
         """
         Pre-load hook to extract the decorators and check the signed fields.
 

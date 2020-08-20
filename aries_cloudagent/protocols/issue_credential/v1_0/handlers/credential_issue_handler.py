@@ -30,8 +30,7 @@ class CredentialIssueHandler(BaseHandler):
         self._logger.debug("CredentialHandler called with context %s", context)
         assert isinstance(context.message, CredentialIssue)
         self._logger.info(
-            "Received credential message: %s",
-            context.message.serialize(as_string=True)
+            "Received credential message: %s", context.message.serialize(as_string=True)
         )
 
         if not context.connection_ready:
@@ -39,21 +38,21 @@ class CredentialIssueHandler(BaseHandler):
 
         credential_manager = CredentialManager(context)
 
-        credential_exchange_record = await credential_manager.receive_credential()
+        cred_ex_record = await credential_manager.receive_credential()
 
         r_time = trace_event(
             context.settings,
             context.message,
             outcome="CredentialIssueHandler.handle.END",
-            perf_counter=r_time
+            perf_counter=r_time,
         )
 
         # Automatically move to next state if flag is set
         if context.settings.get("debug.auto_store_credential"):
             (
-                credential_exchange_record,
+                cred_ex_record,
                 credential_ack_message,
-            ) = await credential_manager.store_credential(credential_exchange_record)
+            ) = await credential_manager.store_credential(cred_ex_record)
 
             # Ack issuer that holder stored credential
             await responder.send_reply(credential_ack_message)
@@ -62,5 +61,5 @@ class CredentialIssueHandler(BaseHandler):
                 context.settings,
                 credential_ack_message,
                 outcome="CredentialIssueHandler.handle.STORE",
-                perf_counter=r_time
+                perf_counter=r_time,
             )

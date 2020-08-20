@@ -1,6 +1,6 @@
 """Represents an explicit ack message as per Aries RFC 15."""
 
-from marshmallow import fields
+from marshmallow import EXCLUDE, fields
 
 from ..agent_message import AgentMessage, AgentMessageSchema
 
@@ -17,11 +17,7 @@ class Ack(AgentMessage):
 
         schema_class = "AckSchema"
 
-    def __init__(
-        self,
-        status: str = None,
-        **kwargs
-    ):
+    def __init__(self, status: str = None, **kwargs):
         """
         Initialize an explicit ack message instance.
 
@@ -40,6 +36,7 @@ class AckSchema(AgentMessageSchema):
         """Ack schema metadata."""
 
         model_class = Ack
+        unknown = EXCLUDE
 
     status = fields.Constant(
         constant="OK",

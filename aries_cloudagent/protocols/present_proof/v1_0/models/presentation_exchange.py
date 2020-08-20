@@ -2,14 +2,13 @@
 
 from typing import Any
 
-from marshmallow import fields
-from marshmallow.validate import OneOf
+from marshmallow import fields, validate
 
-from .....messaging.models.base_record import BaseRecord, BaseRecordSchema
+from .....messaging.models.base_record import BaseExchangeRecord, BaseExchangeSchema
 from .....messaging.valid import UUIDFour
 
 
-class V10PresentationExchange(BaseRecord):
+class V10PresentationExchange(BaseExchangeRecord):
     """Represents an Aries#0037 v1.0 presentation exchange."""
 
     class Meta:
@@ -48,14 +47,16 @@ class V10PresentationExchange(BaseRecord):
         state: str = None,
         presentation_proposal_dict: dict = None,  # serialized pres proposal message
         presentation_request: dict = None,  # indy proof req
+        presentation_request_dict: dict = None,  # serialized pres request message
         presentation: dict = None,  # indy proof
         verified: str = None,
         auto_present: bool = False,
         error_msg: str = None,
+        trace: bool = False,
         **kwargs
     ):
         """Initialize a new PresentationExchange."""
-        super().__init__(presentation_exchange_id, state, **kwargs)
+        super().__init__(presentation_exchange_id, state, trace=trace, **kwargs)
         self.connection_id = connection_id
         self.thread_id = thread_id
         self.initiator = initiator
@@ -63,10 +64,12 @@ class V10PresentationExchange(BaseRecord):
         self.state = state
         self.presentation_proposal_dict = presentation_proposal_dict
         self.presentation_request = presentation_request  # indy proof req
+        self.presentation_request_dict = presentation_request_dict
         self.presentation = presentation  # indy proof
         self.verified = verified
         self.auto_present = auto_present
         self.error_msg = error_msg
+        self.trace = trace
 
     @property
     def presentation_exchange_id(self) -> str:
@@ -83,12 +86,14 @@ class V10PresentationExchange(BaseRecord):
                 "initiator",
                 "presentation_proposal_dict",
                 "presentation_request",
+                "presentation_request_dict",
                 "presentation",
                 "role",
                 "state",
                 "auto_present",
                 "error_msg",
                 "verified",
+                "trace",
             )
         }
 
@@ -97,7 +102,7 @@ class V10PresentationExchange(BaseRecord):
         return super().__eq__(other)
 
 
-class V10PresentationExchangeSchema(BaseRecordSchema):
+class V10PresentationExchangeSchema(BaseExchangeSchema):
     """Schema for de/serialization of v1.0 presentation exchange records."""
 
     class Meta:
@@ -124,13 +129,13 @@ class V10PresentationExchangeSchema(BaseRecordSchema):
         required=False,
         description="Present-proof exchange initiator: self or external",
         example=V10PresentationExchange.INITIATOR_SELF,
-        validate=OneOf(["self", "external"]),
+        validate=validate.OneOf(["self", "external"]),
     )
     role = fields.Str(
         required=False,
         description="Present-proof exchange role: prover or verifier",
         example=V10PresentationExchange.ROLE_PROVER,
-        validate=OneOf(["prover", "verifier"]),
+        validate=validate.OneOf(["prover", "verifier"]),
     )
     state = fields.Str(
         required=False,
@@ -144,6 +149,9 @@ class V10PresentationExchangeSchema(BaseRecordSchema):
         required=False,
         description="(Indy) presentation request (also known as proof request)",
     )
+    presentation_request_dict = fields.Dict(
+        required=False, description="Serialized presentation request message"
+    )
     presentation = fields.Dict(
         required=False, description="(Indy) presentation (also known as proof)"
     )
@@ -151,7 +159,7 @@ class V10PresentationExchangeSchema(BaseRecordSchema):
         required=False,
         description="Whether presentation is verified: true or false",
         example="true",
-        validate=OneOf(["true", "false"]),
+        validate=validate.OneOf(["true", "false"]),
     )
     auto_present = fields.Bool(
         required=False,

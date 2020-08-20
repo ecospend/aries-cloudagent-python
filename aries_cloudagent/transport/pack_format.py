@@ -6,7 +6,9 @@ from typing import Sequence, Tuple, Union
 
 from ..config.base import InjectorError
 from ..config.injection_context import InjectionContext
-from ..protocols.routing.messages.forward import Forward
+
+from ..protocols.routing.v1_0.messages.forward import Forward
+
 from ..messaging.util import time_now
 from ..utils.task_queue import TaskQueue
 from ..wallet.base import BaseWallet

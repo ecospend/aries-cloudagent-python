@@ -2,15 +2,14 @@
 
 from typing import Any
 
-from marshmallow import fields
-from marshmallow.validate import OneOf
+from marshmallow import fields, validate
 
 from .....config.injection_context import InjectionContext
-from .....messaging.models.base_record import BaseRecord, BaseRecordSchema
+from .....messaging.models.base_record import BaseExchangeRecord, BaseExchangeSchema
 from .....messaging.valid import INDY_CRED_DEF_ID, INDY_SCHEMA_ID, UUIDFour
 
 
-class V10CredentialExchange(BaseRecord):
+class V10CredentialExchange(BaseExchangeRecord):
     """Represents an Aries#0036 credential exchange."""
 
     class Meta:
@@ -51,6 +50,7 @@ class V10CredentialExchange(BaseRecord):
         credential_definition_id: str = None,
         schema_id: str = None,
         credential_proposal_dict: dict = None,  # serialized credential proposal message
+        credential_offer_dict: dict = None,  # serialized credential offer message
         credential_offer: dict = None,  # indy credential offer
         credential_request: dict = None,  # indy credential request
         credential_request_metadata: dict = None,
@@ -63,10 +63,11 @@ class V10CredentialExchange(BaseRecord):
         auto_issue: bool = False,
         auto_remove: bool = True,
         error_msg: str = None,
+        trace: bool = False,
         **kwargs,
     ):
         """Initialize a new V10CredentialExchange."""
-        super().__init__(credential_exchange_id, state, **kwargs)
+        super().__init__(credential_exchange_id, state, trace=trace, **kwargs)
         self._id = credential_exchange_id
         self.connection_id = connection_id
         self.thread_id = thread_id
@@ -77,6 +78,7 @@ class V10CredentialExchange(BaseRecord):
         self.credential_definition_id = credential_definition_id
         self.schema_id = schema_id
         self.credential_proposal_dict = credential_proposal_dict
+        self.credential_offer_dict = credential_offer_dict
         self.credential_offer = credential_offer
         self.credential_request = credential_request
         self.credential_request_metadata = credential_request_metadata
@@ -89,6 +91,7 @@ class V10CredentialExchange(BaseRecord):
         self.auto_issue = auto_issue
         self.auto_remove = auto_remove
         self.error_msg = error_msg
+        self.trace = trace
 
     @property
     def credential_exchange_id(self) -> str:
@@ -103,6 +106,7 @@ class V10CredentialExchange(BaseRecord):
             for prop in (
                 "connection_id",
                 "credential_proposal_dict",
+                "credential_offer_dict",
                 "credential_offer",
                 "credential_request",
                 "credential_request_metadata",
@@ -121,6 +125,7 @@ class V10CredentialExchange(BaseRecord):
                 "revocation_id",
                 "role",
                 "state",
+                "trace",
             )
         }
 
@@ -135,7 +140,9 @@ class V10CredentialExchange(BaseRecord):
             record = await cls.retrieve_by_id(context, record_id)
         else:
             record = await cls.retrieve_by_tag_filter(
-                context, {"thread_id": thread_id}, {"connection_id": connection_id}
+                context,
+                {"thread_id": thread_id},
+                {"connection_id": connection_id} if connection_id else None,
             )
             await cls.set_cached_key(context, cache_key, record.credential_exchange_id)
         return record
@@ -145,7 +152,7 @@ class V10CredentialExchange(BaseRecord):
         return super().__eq__(other)
 
 
-class V10CredentialExchangeSchema(BaseRecordSchema):
+class V10CredentialExchangeSchema(BaseExchangeSchema):
     """Schema to allow serialization/deserialization of credential exchange records."""
 
     class Meta:
@@ -171,13 +178,13 @@ class V10CredentialExchangeSchema(BaseRecordSchema):
         required=False,
         description="Issue-credential exchange initiator: self or external",
         example=V10CredentialExchange.INITIATOR_SELF,
-        validate=OneOf(["self", "external"]),
+        validate=validate.OneOf(["self", "external"]),
     )
     role = fields.Str(
         required=False,
         description="Issue-credential exchange role: holder or issuer",
         example=V10CredentialExchange.ROLE_ISSUER,
-        validate=OneOf(["holder", "issuer"]),
+        validate=validate.OneOf(["holder", "issuer"]),
     )
     state = fields.Str(
         required=False,
@@ -194,6 +201,9 @@ class V10CredentialExchangeSchema(BaseRecordSchema):
     )
     credential_proposal_dict = fields.Dict(
         required=False, description="Serialized credential proposal message"
+    )
+    credential_offer_dict = fields.Dict(
+        required=False, description="Serialized credential offer message"
     )
     credential_offer = fields.Dict(
         required=False, description="(Indy) credential offer"

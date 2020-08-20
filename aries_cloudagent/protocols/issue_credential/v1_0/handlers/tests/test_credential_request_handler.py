@@ -16,6 +16,7 @@ from .. import credential_request_handler as handler
 
 CD_ID = "LjgpST2rjsoxYegQDRm7EL:3:CL:18:tag"
 
+
 class TestCredentialRequestHandler(AsyncTestCase):
     async def test_called(self):
         request_context = RequestContext()
@@ -49,15 +50,13 @@ class TestCredentialRequestHandler(AsyncTestCase):
                 "credential_proposal": CredentialPreview(
                     attributes=(CredAttrSpec.list_plain(ATTR_DICT))
                 ).serialize(),
-                "cred_def_id": CD_ID
-            }
+                "cred_def_id": CD_ID,
+            },
         )
 
         with async_mock.patch.object(
             handler, "CredentialManager", autospec=True
-        ) as mock_cred_mgr, async_mock.patch.object(
-            handler, "CredentialProposal", autospec=True
-        ) as mock_cred_proposal:
+        ) as mock_cred_mgr:
             mock_cred_mgr.return_value.receive_request = async_mock.CoroutineMock(
                 return_value=cred_ex_rec
             )
@@ -65,22 +64,13 @@ class TestCredentialRequestHandler(AsyncTestCase):
             mock_cred_mgr.return_value.issue_credential = async_mock.CoroutineMock(
                 return_value=(None, "credential_issue_message")
             )
-            mock_cred_proposal.deserialize = async_mock.MagicMock(
-                return_value=mock_cred_proposal
-            )
-            mock_cred_proposal.credential_proposal = async_mock.MagicMock()
-            mock_cred_proposal.credential_proposal.attr_dict = async_mock.MagicMock(
-                return_value=ATTR_DICT
-            )
             request_context.message = CredentialRequest()
             request_context.connection_ready = True
             handler_inst = handler.CredentialRequestHandler()
             responder = MockResponder()
             await handler_inst.handle(request_context, responder)
             mock_cred_mgr.return_value.issue_credential.assert_called_once_with(
-                credential_exchange_record=cred_ex_rec,
-                comment=None,
-                credential_values=ATTR_DICT
+                cred_ex_record=cred_ex_rec, comment=None
             )
 
         mock_cred_mgr.assert_called_once_with(request_context)
@@ -97,16 +87,12 @@ class TestCredentialRequestHandler(AsyncTestCase):
         request_context.connection_record = async_mock.MagicMock()
 
         cred_ex_rec = V10CredentialExchange(
-            credential_proposal_dict={
-                "cred_def_id": CD_ID
-            }
+            credential_proposal_dict={"cred_def_id": CD_ID}
         )
 
         with async_mock.patch.object(
             handler, "CredentialManager", autospec=True
-        ) as mock_cred_mgr, async_mock.patch.object(
-            handler, "CredentialProposal", autospec=True
-        ) as mock_cred_proposal:
+        ) as mock_cred_mgr:
             mock_cred_mgr.return_value.receive_request = async_mock.CoroutineMock(
                 return_value=cred_ex_rec
             )
@@ -114,10 +100,6 @@ class TestCredentialRequestHandler(AsyncTestCase):
             mock_cred_mgr.return_value.issue_credential = async_mock.CoroutineMock(
                 return_value=(None, "credential_issue_message")
             )
-            mock_cred_proposal.deserialize = async_mock.MagicMock(
-                return_value=mock_cred_proposal
-            )
-            mock_cred_proposal.credential_proposal = async_mock.MagicMock()
 
             request_context.message = CredentialRequest()
             request_context.connection_ready = True

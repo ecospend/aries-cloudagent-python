@@ -61,29 +61,28 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
         assert wallet._wallet_config
 
     @pytest.mark.asyncio
-    async def test_catpol(self, wallet):
-        with pytest.raises(test_module.WalletError):
-            await wallet.get_credential_definition_tag_policy("cred-def-id")  # invalid
-
-        CD_ID = f"{self.test_did}:3:CL:1234:tag"
-        catpol = await wallet.get_credential_definition_tag_policy(CD_ID)
-        assert catpol is None
+    async def test_rotate_did_keypair_x(self, wallet):
+        info = await wallet.create_local_did(self.test_seed, self.test_did)
 
         with async_mock.patch.object(
-            indy.anoncreds,
-            "prover_set_credential_attr_tag_policy",
-            async_mock.CoroutineMock(),
-        ) as mock_catpol:
-            mock_catpol.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+            indy.did, "replace_keys_start", async_mock.CoroutineMock()
+        ) as mock_repl_start:
+            mock_repl_start.side_effect = test_module.IndyError(
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             with pytest.raises(test_module.WalletError) as excinfo:
-                await wallet.set_credential_definition_tag_policy(CD_ID)
+                await wallet.rotate_did_keypair_start(self.test_did)
             assert "outlier" in str(excinfo.value)
 
+        with async_mock.patch.object(
+            indy.did, "replace_keys_apply", async_mock.CoroutineMock()
+        ) as mock_repl_apply:
+            mock_repl_apply.side_effect = test_module.IndyError(
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
+            )
+            with pytest.raises(test_module.WalletError) as excinfo:
+                await wallet.rotate_did_keypair_apply(self.test_did)
+            assert "outlier" in str(excinfo.value)
 
     @pytest.mark.asyncio
     async def test_create_signing_key_x(self, wallet):
@@ -91,10 +90,7 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
             indy.crypto, "create_key", async_mock.CoroutineMock()
         ) as mock_create_key:
             mock_create_key.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             with pytest.raises(test_module.WalletError) as excinfo:
                 await wallet.create_signing_key()
@@ -106,14 +102,25 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
             indy.did, "create_and_store_my_did", async_mock.CoroutineMock()
         ) as mock_create:
             mock_create.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             with pytest.raises(test_module.WalletError) as excinfo:
                 await wallet.create_local_did()
             assert "outlier" in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_set_did_endpoint_ledger(self, wallet):
+        mock_ledger = async_mock.MagicMock(
+            update_endpoint_for_did=async_mock.CoroutineMock()
+        )
+        info_pub = await wallet.create_public_did()
+        await wallet.set_did_endpoint(info_pub.did, "http://1.2.3.4:8021", mock_ledger)
+        info_pub2 = await wallet.get_public_did()
+        assert info_pub2.metadata["endpoint"] == "http://1.2.3.4:8021"
+
+        with pytest.raises(test_module.LedgerConfigError) as excinfo:
+            await wallet.set_did_endpoint(info_pub.did, "http://1.2.3.4:8021", None)
+        assert "No ledger available" in str(excinfo.value)
 
     @pytest.mark.asyncio
     async def test_get_signing_key_x(self, wallet):
@@ -121,10 +128,7 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
             indy.crypto, "get_key_metadata", async_mock.CoroutineMock()
         ) as mock_signing:
             mock_signing.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             with pytest.raises(test_module.WalletError) as excinfo:
                 await wallet.get_signing_key(None)
@@ -136,10 +140,7 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
             indy.did, "get_my_did_with_meta", async_mock.CoroutineMock()
         ) as mock_my:
             mock_my.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             with pytest.raises(test_module.WalletError) as excinfo:
                 await wallet.get_local_did(None)
@@ -151,16 +152,11 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
             indy.crypto, "crypto_verify", async_mock.CoroutineMock()
         ) as mock_verify:
             mock_verify.side_effect = test_module.IndyError(  # outlier
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             with pytest.raises(test_module.WalletError) as excinfo:
                 await wallet.verify_message(
-                    b"hello world",
-                    b"signature",
-                    self.test_verkey
+                    b"hello world", b"signature", self.test_verkey
                 )
             assert "outlier" in str(excinfo.value)
 
@@ -168,9 +164,7 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
                 test_module.ErrorCode.CommonInvalidStructure
             )
             assert not await wallet.verify_message(
-                b"hello world",
-                b"signature",
-                self.test_verkey
+                b"hello world", b"signature", self.test_verkey
             )
 
     @pytest.mark.asyncio
@@ -179,15 +173,11 @@ class TestIndyWallet(test_basic_wallet.TestBasicWallet):
             indy.crypto, "pack_message", async_mock.CoroutineMock()
         ) as mock_pack:
             mock_pack.side_effect = test_module.IndyError(  # outlier
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             with pytest.raises(test_module.WalletError) as excinfo:
                 await wallet.pack_message(
-                    b"hello world",
-                    [self.test_verkey, ],
+                    b"hello world", [self.test_verkey,],
                 )
             assert "outlier" in str(excinfo.value)
 
@@ -228,13 +218,13 @@ class TestWalletCompat:
         Coverage through mock framework.
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -275,13 +265,13 @@ class TestWalletCompat:
         Coverage through mock framework: raise on creation of existing wallet
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -322,13 +312,13 @@ class TestWalletCompat:
         Coverage through mock framework: raise on creation outlier
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -345,10 +335,7 @@ class TestWalletCompat:
             indy.wallet, "delete_wallet", async_mock.CoroutineMock()
         ) as mock_delete:
             mock_create.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             fake_wallet = IndyWallet(
                 {
@@ -372,13 +359,13 @@ class TestWalletCompat:
         Coverage through mock framework: exception on removal.
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -395,10 +382,7 @@ class TestWalletCompat:
             indy.wallet, "delete_wallet", async_mock.CoroutineMock()
         ) as mock_delete:
             mock_delete.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             fake_wallet = IndyWallet(
                 {
@@ -427,13 +411,13 @@ class TestWalletCompat:
         Coverage through mock framework: double-open (no-op).
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -476,13 +460,13 @@ class TestWalletCompat:
         Coverage through mock framework: missing created wallet.
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -499,10 +483,7 @@ class TestWalletCompat:
             indy.wallet, "delete_wallet", async_mock.CoroutineMock()
         ) as mock_delete:
             mock_open.side_effect = test_module.IndyError(
-                test_module.ErrorCode.WalletNotFoundError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.WalletNotFoundError, {"message": "outlier"}
             )
             fake_wallet = IndyWallet(
                 {
@@ -528,13 +509,13 @@ class TestWalletCompat:
         Coverage through mock framework: missing wallet on open.
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -551,10 +532,7 @@ class TestWalletCompat:
             indy.wallet, "delete_wallet", async_mock.CoroutineMock()
         ) as mock_delete:
             mock_open.side_effect = test_module.IndyError(
-                test_module.ErrorCode.WalletNotFoundError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.WalletNotFoundError, {"message": "outlier"}
             )
             fake_wallet = IndyWallet(
                 {
@@ -580,13 +558,13 @@ class TestWalletCompat:
         Coverage through mock framework: indy thinks wallet is open, aca-py does not.
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -603,10 +581,7 @@ class TestWalletCompat:
             indy.wallet, "delete_wallet", async_mock.CoroutineMock()
         ) as mock_delete:
             mock_open.side_effect = test_module.IndyError(
-                test_module.ErrorCode.WalletAlreadyOpenedError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.WalletAlreadyOpenedError, {"message": "outlier"}
             )
             fake_wallet = IndyWallet(
                 {
@@ -632,13 +607,13 @@ class TestWalletCompat:
         Coverage through mock framework: outlier on wallet open.
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -655,10 +630,7 @@ class TestWalletCompat:
             indy.wallet, "delete_wallet", async_mock.CoroutineMock()
         ) as mock_delete:
             mock_open.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             fake_wallet = IndyWallet(
                 {
@@ -684,13 +656,13 @@ class TestWalletCompat:
         Coverage through mock framework: outlier on master secret creation
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -707,10 +679,7 @@ class TestWalletCompat:
             indy.wallet, "delete_wallet", async_mock.CoroutineMock()
         ) as mock_delete:
             mock_master.side_effect = test_module.IndyError(
-                test_module.ErrorCode.CommonIOError,
-                {
-                    "message": "outlier"
-                }
+                test_module.ErrorCode.CommonIOError, {"message": "outlier"}
             )
             fake_wallet = IndyWallet(
                 {
@@ -736,13 +705,13 @@ class TestWalletCompat:
         Coverage through mock framework: open, master secret exists (OK).
         """
         wallet_key = await IndyWallet.generate_wallet_key()
-        storage_config_json = json.dumps({"url":"dummy"})
+        storage_config_json = json.dumps({"url": "dummy"})
         storage_creds_json = json.dumps(
             {
-                "account":"postgres",
-                "password":"mysecretpassword",
-                "admin_account":"postgres",
-                "admin_password":"mysecretpassword"
+                "account": "postgres",
+                "password": "mysecretpassword",
+                "admin_account": "postgres",
+                "admin_password": "mysecretpassword",
             },
         )
         with async_mock.patch.object(
@@ -840,7 +809,9 @@ class TestWalletCompat:
                 "key": wallet_key,
                 "key_derivation_method": "RAW",
                 "storage_type": "postgres_storage",
-                "storage_config": '{"url":"' + postgres_url + '", "wallet_scheme":"MultiWalletSingleTable"}',
+                "storage_config": '{"url":"'
+                + postgres_url
+                + '", "wallet_scheme":"MultiWalletSingleTable"}',
                 "storage_creds": '{"account":"postgres","password":"mysecretpassword","admin_account":"postgres","admin_password":"mysecretpassword"}',
             }
         )
@@ -850,7 +821,7 @@ class TestWalletCompat:
         with pytest.raises(WalletError) as excinfo:
             await wallet.create()
         assert "Wallet was not removed" in str(excinfo.value)
-        
+
         await postgres_wallet.create_local_did(self.test_seed)
         py_packed = await postgres_wallet.pack_message(
             self.test_message, [self.test_verkey], self.test_verkey
@@ -879,7 +850,9 @@ class TestWalletCompat:
                 "key": wallet_key,
                 "key_derivation_method": "RAW",
                 "storage_type": "postgres_storage",
-                "storage_config": '{"url":"' + postgres_url + '", "wallet_scheme":"MultiWalletSingleTableSharedPool"}',
+                "storage_config": '{"url":"'
+                + postgres_url
+                + '", "wallet_scheme":"MultiWalletSingleTableSharedPool"}',
                 "storage_creds": '{"account":"postgres","password":"mysecretpassword","admin_account":"postgres","admin_password":"mysecretpassword"}',
             }
         )

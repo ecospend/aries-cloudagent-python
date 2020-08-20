@@ -13,10 +13,13 @@ from ..ledger.provider import LedgerProvider
 from ..issuer.base import BaseIssuer
 from ..holder.base import BaseHolder
 from ..verifier.base import BaseVerifier
-from ..protocols.actionmenu.base_service import BaseMenuService
-from ..protocols.actionmenu.driver_service import DriverMenuService
-from ..protocols.introduction.base_service import BaseIntroductionService
-from ..protocols.introduction.demo_service import DemoIntroductionService
+from ..tails.base import BaseTailsServer
+
+from ..protocols.actionmenu.v1_0.base_service import BaseMenuService
+from ..protocols.actionmenu.v1_0.driver_service import DriverMenuService
+from ..protocols.introduction.v0_1.base_service import BaseIntroductionService
+from ..protocols.introduction.v0_1.demo_service import DemoIntroductionService
+
 from ..storage.base import BaseStorage
 from ..storage.provider import StorageProvider
 from ..transport.wire_format import BaseWireFormat
@@ -114,8 +117,12 @@ class DefaultContextBuilder(ContextBuilder):
             BaseVerifier,
             ClassProvider(
                 "aries_cloudagent.verifier.indy.IndyVerifier",
-                ClassProvider.Inject(BaseWallet),
+                ClassProvider.Inject(BaseLedger),
             ),
+        )
+        context.injector.bind_provider(
+            BaseTailsServer,
+            ClassProvider("aries_cloudagent.tails.indy_tails_server.IndyTailsServer",),
         )
 
         # Register default pack format
@@ -149,6 +156,7 @@ class DefaultContextBuilder(ContextBuilder):
         plugin_registry.register_package("aries_cloudagent.protocols")
 
         # Currently providing admin routes only
+        plugin_registry.register_plugin("aries_cloudagent.holder")
         plugin_registry.register_plugin("aries_cloudagent.ledger")
         plugin_registry.register_plugin(
             "aries_cloudagent.messaging.credential_definitions"

@@ -3,7 +3,7 @@
 
 from typing import Sequence
 
-from marshmallow import fields, validate
+from marshmallow import EXCLUDE, fields
 
 from ......messaging.models.base import BaseModel, BaseModelSchema
 from ......wallet.util import b64_to_str
@@ -74,6 +74,7 @@ class CredAttrSpecSchema(BaseModelSchema):
         """Attribute preview schema metadata."""
 
         model_class = CredAttrSpec
+        unknown = EXCLUDE
 
     name = fields.Str(
         description="Attribute name", required=True, example="favourite_drink"
@@ -163,15 +164,13 @@ class CredentialPreviewSchema(BaseModelSchema):
         """Credential preview schema metadata."""
 
         model_class = CredentialPreview
+        unknown = EXCLUDE
 
     _type = fields.Str(
         description="Message type identifier",
         required=False,
         example=CREDENTIAL_PREVIEW,
         data_key="@type",
-        validate=validate.Equal(
-            CREDENTIAL_PREVIEW, error="Must be absent or equal to {other}"
-        ),
     )
     attributes = fields.Nested(
         CredAttrSpecSchema, many=True, required=True, data_key="attributes"

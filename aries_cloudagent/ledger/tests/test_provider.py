@@ -13,6 +13,7 @@ from ..provider import LedgerProvider
 
 from aries_cloudagent.ledger.indy import IndyLedger
 
+
 @pytest.mark.indy
 class TestProvider(AsyncTestCase):
     test_did = "55GkHamhTU1ZbTbV2ab9DE"
@@ -21,35 +22,30 @@ class TestProvider(AsyncTestCase):
     @async_mock.patch("indy.pool.create_pool_ledger_config")
     @async_mock.patch("builtins.open")
     async def test_provide(
-        self,
-        mock_open,
-        mock_create_ledger_config,
+        self, mock_open, mock_create_ledger_config,
     ):
         mock_open.return_value = async_mock.MagicMock()
         provider = LedgerProvider()
 
         context = InjectionContext(enforce_typing=False)
         mock_wallet = async_mock.MagicMock()
-        mock_wallet.WALLET_TYPE = "indy"
+        mock_wallet.type = "indy"
         context.injector.bind_instance(BaseWallet, mock_wallet)
-        
+
         result = await provider.provide(
             settings={
                 "ledger.pool_name": "name",
-                "ledger.genesis_transactions": "dummy"
+                "ledger.genesis_transactions": "dummy",
+                "ledger.read_only": True,
             },
-            injector=context.injector
+            injector=context.injector,
         )
         assert isinstance(result, IndyLedger)
         assert result.pool_name == "name"
 
     @async_mock.patch("indy.pool.list_pools")
     @async_mock.patch("builtins.open")
-    async def test_provide_no_pool_config(
-        self,
-        mock_open,
-        mock_list_pools
-    ):
+    async def test_provide_no_pool_config(self, mock_open, mock_list_pools):
         mock_open.return_value = async_mock.MagicMock()
         provider = LedgerProvider()
 
@@ -57,13 +53,10 @@ class TestProvider(AsyncTestCase):
 
         context = InjectionContext(enforce_typing=False)
         mock_wallet = async_mock.MagicMock()
-        mock_wallet.WALLET_TYPE = "indy"
+        mock_wallet.type = "indy"
         context.injector.bind_instance(BaseWallet, mock_wallet)
-        
+
         result = await provider.provide(
-            settings={
-                "ledger.pool_name": "name",
-            },
-            injector=context.injector
+            settings={"ledger.pool_name": "name",}, injector=context.injector
         )
         assert result is None

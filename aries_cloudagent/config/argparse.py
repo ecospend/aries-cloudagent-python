@@ -179,7 +179,7 @@ class DebugGroup(ArgumentGroup):
             action="store_true",
             help="Enables a remote debugging service that can be accessed\
             using ptvsd for Visual Studio Code. The framework will wait\
-            for the debugger to connect at start-up. Default: false."
+            for the debugger to connect at start-up. Default: false.",
         )
         parser.add_argument(
             "--debug-seed",
@@ -216,30 +216,30 @@ class DebugGroup(ArgumentGroup):
             dest="invite_role",
             type=str,
             metavar="<role>",
-            help="Specify the role of the generated invitation."
+            help="Specify the role of the generated invitation.",
         )
         parser.add_argument(
             "--invite-label",
             dest="invite_label",
             type=str,
             metavar="<label>",
-            help="Specify the label of the generated invitation."
+            help="Specify the label of the generated invitation.",
         )
         parser.add_argument(
             "--invite-multi-use",
             action="store_true",
-            help="Flag specifying the generated invite should be multi-use."
+            help="Flag specifying the generated invite should be multi-use.",
         )
         parser.add_argument(
             "--invite-public",
             action="store_true",
-            help="Flag specifying the generated invite should be public."
+            help="Flag specifying the generated invite should be public.",
         )
         parser.add_argument(
             "--test-suite-endpoint",
             type=str,
             metavar="<endpoint>",
-            help="URL endpoint for sending messages to the test suite agent."
+            help="URL endpoint for sending messages to the test suite agent.",
         )
 
         parser.add_argument(
@@ -400,6 +400,12 @@ class GeneralGroup(ArgumentGroup):
             help="Sets ledger to read-only to prevent updates.\
             Default: false.",
         )
+        parser.add_argument(
+            "--tails-server-base-url",
+            type=str,
+            metavar="<tails-server-base-url>",
+            help="Sets the base url of the tails server in use.",
+        )
 
     def get_settings(self, args: Namespace) -> dict:
         """Extract general settings."""
@@ -413,6 +419,8 @@ class GeneralGroup(ArgumentGroup):
             settings["additional_endpoints"] = args.endpoint[1:]
         if args.read_only_ledger:
             settings["read_only_ledger"] = True
+        if args.tails_server_base_url:
+            settings["tails_server_base_url"] = args.tails_server_base_url
         return settings
 
 
@@ -436,9 +444,9 @@ class LedgerGroup(ArgumentGroup):
             type=str,
             dest="genesis_transactions",
             metavar="<genesis-transactions>",
-            help="Specifies the genesis transactions to use to connect to\
+            help='Specifies the genesis transactions to use to connect to\
             an Hyperledger Indy ledger. The transactions are provided as string\
-            of JSON e.g. '{\"reqSignature\":{},\"txn\":{\"data\":{\"d... <snip>'",
+            of JSON e.g. \'{"reqSignature":{},"txn":{"data":{"d... <snip>\'',
         )
         parser.add_argument(
             "--genesis-file",
@@ -538,7 +546,7 @@ class ProtocolGroup(ArgumentGroup):
             "--invite-base-url",
             type=str,
             metavar="<base-url>",
-            help="Base URL to use when formatting connection invitations in URL format."
+            help="Base URL to use when formatting connection invitations in URL format.",
         )
         parser.add_argument(
             "--monitor-ping",
@@ -563,15 +571,13 @@ class ProtocolGroup(ArgumentGroup):
             help="Write timing information to a given log file.",
         )
         parser.add_argument(
-            "--trace",
-            action="store_true",
-            help="Generate tracing events.",
+            "--trace", action="store_true", help="Generate tracing events.",
         )
         parser.add_argument(
             "--trace-target",
             type=str,
             metavar="<trace-target>",
-            help="Target for trace events (\"log\", \"message\", or http endpoint).",
+            help='Target for trace events ("log", "message", or http endpoint).',
         )
         parser.add_argument(
             "--trace-tag",
@@ -588,7 +594,7 @@ class ProtocolGroup(ArgumentGroup):
         parser.add_argument(
             "--preserve-exchange-records",
             action="store_true",
-            help="Keep credential exchange records after exchange has completed."
+            help="Keep credential exchange records after exchange has completed.",
         )
 
     def get_settings(self, args: Namespace) -> dict:
@@ -606,12 +612,12 @@ class ProtocolGroup(ArgumentGroup):
             settings["timing.enabled"] = True
         if args.timing_log:
             settings["timing.log_file"] = args.timing_log
+        # note that you can configure tracing without actually enabling it
+        # this is to allow message- or exchange-specific tracing (vs global)
+        settings["trace.target"] = "log"
+        settings["trace.tag"] = ""
         if args.trace:
-            # note that you can configure tracing without actually enabling it
-            # this is to allow message- or exchange-specific tracing (vs global)
             settings["trace.enabled"] = True
-            settings["trace.target"] = "log"
-            settings["trace.tag"] = ""
         if args.trace_target:
             settings["trace.target"] = args.trace_target
         if args.trace_tag:
@@ -622,20 +628,20 @@ class ProtocolGroup(ArgumentGroup):
             settings["trace.label"] = args.label
         else:
             settings["trace.label"] = "aca-py.agent"
-        if settings.get("trace.enabled"):
+        if settings.get("trace.enabled") or settings.get("trace.target"):
+            # make sure we can trace to the configured target
+            # (target can be set even if tracing is off)
             try:
                 trace_event(
                     settings,
                     None,
                     handler="ArgParse",
-                    outcome="Successfully configured aca-py",
-                    raise_errors=True
+                    outcome="Successfully_configured_aca-py",
+                    raise_errors=True,
+                    force_trace=True,
                 )
             except Exception as e:
-                raise ArgsParseError(
-                    "Error writing trace event "
-                    + str(e)
-                )
+                raise ArgsParseError("Error writing trace event " + str(e))
         if args.preserve_exchange_records:
             settings["preserve_exchange_records"] = True
         return settings
@@ -700,6 +706,14 @@ class TransportGroup(ArgumentGroup):
             to hold messages for delivery to agents without an endpoint. This\
             option will require additional memory to store messages in the queue.",
         )
+        parser.add_argument(
+            "--max-outbound-retry",
+            default=4,
+            type=ByteSize(min_size=1),
+            help="Set the maximum retry number for undelivered outbound\
+            messages. Increasing this number might cause to increase the\
+            accumulated messages in message queue. Default value is 4.",
+        )
 
     def get_settings(self, args: Namespace):
         """Extract transport settings."""
@@ -712,6 +726,8 @@ class TransportGroup(ArgumentGroup):
             settings["default_label"] = args.label
         if args.max_message_size:
             settings["transport.max_message_size"] = args.max_message_size
+        if args.max_outbound_retry:
+            settings["transport.max_outbound_retry"] = args.max_outbound_retry
 
         return settings
 
@@ -728,15 +744,30 @@ class WalletGroup(ArgumentGroup):
             "--seed",
             type=str,
             metavar="<wallet-seed>",
-            help="Specifies the seed to use for the creation of a public DID\
-            for the agent to use with a Hyperledger Indy ledger. The DID\
-            must already exist on the ledger.",
+            help="Specifies the seed to use for the creation of a public\
+            DID for the agent to use with a Hyperledger Indy ledger, or a local\
+            ('--wallet-local-did') DID. If public, the DID must already exist\
+            on the ledger.",
+        )
+        parser.add_argument(
+            "--wallet-local-did",
+            action="store_true",
+            help="If this parameter is set, provisions the wallet with a\
+            local DID from the '--seed' parameter, instead of a public DID\
+            to use with a Hyperledger Indy ledger.",
         )
         parser.add_argument(
             "--wallet-key",
             type=str,
             metavar="<wallet-key>",
-            help="Specifies the master key value to use for opening the wallet.",
+            help="Specifies the master key value to use to open the wallet.",
+        )
+        parser.add_argument(
+            "--wallet-rekey",
+            type=str,
+            metavar="<wallet-rekey>",
+            help="Specifies a new master key value to which to rotate and to\
+            open the wallet next time.",
         )
         parser.add_argument(
             "--wallet-name",
@@ -764,19 +795,25 @@ class WalletGroup(ArgumentGroup):
             "--wallet-storage-config",
             type=str,
             metavar="<storage-config>",
-            help="Specifies the storage configuration to use for the wallet.\
-            This is required if you are for using 'postgres_storage' wallet\
-            storage type. For example, '{\"url\":\"localhost:5432\"}'.",
+            help='Specifies the storage configuration to use for the wallet.\
+            This is required if you are for using \'postgres_storage\' wallet\
+            storage type. For example, \'{"url":"localhost:5432",\
+            "wallet_scheme":"MultiWalletSingleTable"}\'. This\
+            configuration maps to the indy sdk postgres plugin\
+            (PostgresConfig).',
         )
         parser.add_argument(
             "--wallet-storage-creds",
             type=str,
             metavar="<storage-creds>",
-            help="Specify the storage credentials to use for the wallet.\
-            This is required if you are for using 'postgres_storage' wallet\
-            For example, '{\"account\":\"postgres\",\"password\":\
-            \"mysecretpassword\",\"admin_account\":\"postgres\",\"admin_password\":\
-            \"mysecretpassword\"}'",
+            help='Specifies the storage credentials to use for the wallet.\
+            This is required if you are for using \'postgres_storage\' wallet\
+            For example, \'{"account":"postgres","password":\
+            "mysecretpassword","admin_account":"postgres",\
+            "admin_password":"mysecretpassword"}\'. This configuration maps\
+            to the indy sdk postgres plugin (PostgresCredentials). NOTE:\
+            admin_user must have the CREATEDB role or else initialization\
+            will fail.',
         )
         parser.add_argument(
             "--replace-public-did",
@@ -791,8 +828,12 @@ class WalletGroup(ArgumentGroup):
         settings = {}
         if args.seed:
             settings["wallet.seed"] = args.seed
+        if args.wallet_local_did:
+            settings["wallet.local_did"] = True
         if args.wallet_key:
             settings["wallet.key"] = args.wallet_key
+        if args.wallet_rekey:
+            settings["wallet.rekey"] = args.wallet_rekey
         if args.wallet_name:
             settings["wallet.name"] = args.wallet_name
         if args.wallet_storage_type:
