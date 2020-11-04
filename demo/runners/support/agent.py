@@ -34,6 +34,8 @@ TRACE_TARGET = os.getenv("TRACE_TARGET")
 TRACE_TAG = os.getenv("TRACE_TAG")
 TRACE_ENABLED = os.getenv("TRACE_ENABLED")
 
+WEBHOOK_TARGET = os.getenv("WEBHOOK_TARGET")
+
 AGENT_ENDPOINT = os.getenv("AGENT_ENDPOINT")
 
 DEFAULT_POSTGRES = bool(os.getenv("POSTGRES"))
@@ -134,6 +136,7 @@ class DemoAgent:
         self.trace_enabled = TRACE_ENABLED
         self.trace_target = TRACE_TARGET
         self.trace_tag = TRACE_TAG
+        self.external_webhook_target = WEBHOOK_TARGET
 
         self.admin_url = f"http://{self.internal_host}:{admin_port}"
         if AGENT_ENDPOINT:
@@ -190,7 +193,11 @@ class DemoAgent:
         credential_definition_body = {
             "schema_id": schema_id,
             "support_revocation": support_revocation,
-            "revocation_registry_size": revocation_registry_size,
+            **{
+                "revocation_registry_size": revocation_registry_size
+                for _ in [""]
+                if support_revocation
+            },
         }
         credential_definition_response = await self.admin_POST(
             "/credential-definitions", credential_definition_body
@@ -236,6 +243,8 @@ class DemoAgent:
             )
         if self.webhook_url:
             result.append(("--webhook-url", self.webhook_url))
+        if self.external_webhook_target:
+            result.append(("--webhook-url", self.external_webhook_target))
         if self.trace_enabled:
             result.extend(
                 [
@@ -422,7 +431,7 @@ class DemoAgent:
 
     async def handle_revocation_registry(self, message):
         self.log(
-            f"Revocation registry: {message['record_id']} state: {message['state']}"
+            f"Revocation registry: {message['revoc_reg_id']} state: {message['state']}"
         )
 
     async def admin_request(
@@ -452,7 +461,9 @@ class DemoAgent:
             EVENT_LOGGER.debug("Controller GET %s request to Agent", path)
             response = await self.admin_request("GET", path, None, text, params)
             EVENT_LOGGER.debug(
-                "Response from GET %s received: \n%s", path, repr_json(response),
+                "Response from GET %s received: \n%s",
+                path,
+                repr_json(response),
             )
             return response
         except ClientError as e:
@@ -470,7 +481,9 @@ class DemoAgent:
             )
             response = await self.admin_request("POST", path, data, text, params)
             EVENT_LOGGER.debug(
-                "Response from POST %s received: \n%s", path, repr_json(response),
+                "Response from POST %s received: \n%s",
+                path,
+                repr_json(response),
             )
             return response
         except ClientError as e:

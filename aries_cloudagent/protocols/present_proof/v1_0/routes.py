@@ -15,6 +15,7 @@ from marshmallow.exceptions import ValidationError
 
 from ....connections.models.connection_record import ConnectionRecord
 from ....holder.base import BaseHolder, HolderError
+from ....indy.util import generate_pr_nonce
 from ....ledger.error import LedgerError
 from ....messaging.decorators.attach_decorator import AttachDecorator
 from ....messaging.models.base import BaseModelError
@@ -33,7 +34,8 @@ from ....messaging.valid import (
     WHOLE_NUM,
 )
 from ....storage.error import StorageError, StorageNotFoundError
-from ....indy.util import generate_pr_nonce
+from ....utils.tracing import trace_event, get_timer, AdminAPIMessageTracingSchema
+from ....wallet.error import WalletNotFoundError
 
 from ...problem_report.v1_0 import internal_error
 
@@ -49,9 +51,6 @@ from .models.presentation_exchange import (
     V10PresentationExchange,
     V10PresentationExchangeSchema,
 )
-
-
-from ....utils.tracing import trace_event, get_timer, AdminAPIMessageTracingSchema
 
 
 class V10PresentationExchangeListQueryStringSchema(OpenAPISchema):
@@ -157,11 +156,13 @@ class IndyProofReqNonRevokedSchema(OpenAPISchema):
         description="Earliest epoch of interest for non-revocation proof",
         required=False,
         data_key="from",
+        strict=True,
         **INT_EPOCH,
     )
     to = fields.Int(
         description="Latest epoch of interest for non-revocation proof",
         required=False,
+        strict=True,
         **INT_EPOCH,
     )
 
@@ -177,9 +178,10 @@ class IndyProofReqNonRevokedSchema(OpenAPISchema):
             ValidationError: if data has neither from nor to
 
         """
-        if not (data.get("from") or data.get("to")):
+        if not data:
             raise ValidationError(
-                "Non-revocation interval must have at least one end", ("fro", "to")
+                "Non-revocation interval must have at least one end",
+                "(from, to)",
             )
 
 
@@ -255,7 +257,7 @@ class IndyProofReqPredSpecSchema(OpenAPISchema):
         required=True,
         **INDY_PREDICATE,
     )
-    p_value = fields.Integer(description="Threshold value", required=True)
+    p_value = fields.Int(description="Threshold value", required=True, strict=True)
     restrictions = fields.List(
         fields.Nested(IndyProofReqPredSpecRestrictionsSchema()),
         description="If present, credential must satisfy one of given restrictions",
@@ -333,6 +335,7 @@ class IndyRequestedCredsRequestedAttrSchema(OpenAPISchema):
     timestamp = fields.Int(
         description="Epoch timestamp of interest for non-revocation proof",
         required=False,
+        strict=True,
         **INT_EPOCH,
     )
 
@@ -350,6 +353,7 @@ class IndyRequestedCredsRequestedPredSchema(OpenAPISchema):
     timestamp = fields.Int(
         description="Epoch timestamp of interest for non-revocation proof",
         required=False,
+        strict=True,
         **INT_EPOCH,
     )
 
@@ -402,9 +406,17 @@ class CredentialsFetchQueryStringSchema(OpenAPISchema):
         required=False,
         example="1_name_uuid,2_score_uuid",
     )
-    start = fields.Int(description="Start index", required=False, **WHOLE_NUM)
+    start = fields.Int(
+        description="Start index",
+        required=False,
+        strict=True,
+        **WHOLE_NUM,
+    )
     count = fields.Int(
-        description="Maximum number to retrieve", required=False, **NATURAL_NUM
+        description="Maximum number to retrieve",
+        required=False,
+        strict=True,
+        **NATURAL_NUM,
     )
     extra_query = fields.Str(
         description="(JSON) object mapping referents to extra WQL queries",
@@ -600,7 +612,8 @@ async def presentation_exchange_send_proposal(request: web.BaseRequest):
 
     trace_msg = body.get("trace")
     presentation_proposal_message.assign_trace_decorator(
-        context.settings, trace_msg,
+        context.settings,
+        trace_msg,
     )
     auto_present = body.get(
         "auto_present", context.settings.get("debug.auto_respond_presentation_request")
@@ -680,7 +693,8 @@ async def presentation_exchange_create_request(request: web.BaseRequest):
     )
     trace_msg = body.get("trace")
     presentation_request_message.assign_trace_decorator(
-        context.settings, trace_msg,
+        context.settings,
+        trace_msg,
     )
 
     presentation_manager = PresentationManager(context)
@@ -757,7 +771,8 @@ async def presentation_exchange_send_free_request(request: web.BaseRequest):
     )
     trace_msg = body.get("trace")
     presentation_request_message.assign_trace_decorator(
-        context.settings, trace_msg,
+        context.settings,
+        trace_msg,
     )
 
     presentation_manager = PresentationManager(context)
@@ -853,7 +868,8 @@ async def presentation_exchange_send_bound_request(request: web.BaseRequest):
 
     trace_msg = body.get("trace")
     presentation_request_message.assign_trace_decorator(
-        context.settings, trace_msg,
+        context.settings,
+        trace_msg,
     )
     await outbound_handler(presentation_request_message, connection_id=connection_id)
 
@@ -927,7 +943,13 @@ async def presentation_exchange_send_presentation(request: web.BaseRequest):
             comment=body.get("comment"),
         )
         result = pres_ex_record.serialize()
-    except (BaseModelError, HolderError, LedgerError, StorageError) as err:
+    except (
+        BaseModelError,
+        HolderError,
+        LedgerError,
+        StorageError,
+        WalletNotFoundError,
+    ) as err:
         await internal_error(
             err,
             web.HTTPBadRequest,
@@ -937,7 +959,8 @@ async def presentation_exchange_send_presentation(request: web.BaseRequest):
 
     trace_msg = body.get("trace")
     presentation_message.assign_trace_decorator(
-        context.settings, trace_msg,
+        context.settings,
+        trace_msg,
     )
     await outbound_handler(presentation_message, connection_id=connection_id)
 
@@ -1060,13 +1083,16 @@ async def register(app: web.Application):
                 allow_head=False,
             ),
             web.post(
-                "/present-proof/send-proposal", presentation_exchange_send_proposal,
+                "/present-proof/send-proposal",
+                presentation_exchange_send_proposal,
             ),
             web.post(
-                "/present-proof/create-request", presentation_exchange_create_request,
+                "/present-proof/create-request",
+                presentation_exchange_create_request,
             ),
             web.post(
-                "/present-proof/send-request", presentation_exchange_send_free_request,
+                "/present-proof/send-request",
+                presentation_exchange_send_free_request,
             ),
             web.post(
                 "/present-proof/records/{pres_ex_id}/send-request",
@@ -1080,8 +1106,8 @@ async def register(app: web.Application):
                 "/present-proof/records/{pres_ex_id}/verify-presentation",
                 presentation_exchange_verify_presentation,
             ),
-            web.post(
-                "/present-proof/records/{pres_ex_id}/remove",
+            web.delete(
+                "/present-proof/records/{pres_ex_id}",
                 presentation_exchange_remove,
             ),
         ]

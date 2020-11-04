@@ -25,8 +25,11 @@ from ..storage.base import StorageRecord
 from ..storage.indy import IndyStorage
 from ..utils import sentinel
 from ..wallet.base import BaseWallet, DIDInfo
+from ..wallet.util import full_verkey
+from ..wallet.did_posture import DIDPosture
 
 from .base import BaseLedger
+from .endpoint_type import EndpointType
 from .error import (
     BadLedgerRequestError,
     ClosedPoolError,
@@ -34,8 +37,9 @@ from .error import (
     LedgerError,
     LedgerTransactionError,
 )
-from .util import TAA_ACCEPTED_RECORD_TYPE, EndpointType
+from .util import TAA_ACCEPTED_RECORD_TYPE
 
+LOGGER = logging.getLogger(__name__)
 
 GENESIS_TRANSACTION_PATH = tempfile.gettempdir()
 GENESIS_TRANSACTION_PATH = path.join(
@@ -79,7 +83,7 @@ class Role(Enum):
         """
         Return (typically, numeric) string value that indy-sdk associates with role.
 
-        Recall that None signifies USER and "" signifies role in reset.
+        Recall that None signifies USER and "" signifies a role undergoing reset.
         """
 
         return str(self.value[0]) if isinstance(self.value[0], int) else self.value[0]
@@ -115,8 +119,6 @@ class IndyLedger(BaseLedger):
             cache: The cache instance to use
             cache_duration: The TTL for ledger cache entries
         """
-        self.logger = logging.getLogger(__name__)
-
         self.opened = False
         self.ref_count = 0
         self.ref_lock = asyncio.Lock()
@@ -153,16 +155,16 @@ class IndyLedger(BaseLedger):
 
         if await self.check_pool_config():
             if recreate:
-                self.logger.debug("Removing existing ledger config")
+                LOGGER.debug("Removing existing ledger config")
                 await indy.pool.delete_pool_ledger_config(self.pool_name)
             else:
                 raise LedgerConfigError(
                     "Ledger pool configuration already exists: %s", self.pool_name
                 )
 
-        self.logger.debug("Creating pool ledger config")
+        LOGGER.debug("Creating pool ledger config")
         with IndyErrorHandler(
-            "Exception when creating pool ledger config", LedgerConfigError
+            "Exception creating pool ledger config", LedgerConfigError
         ):
             await indy.pool.create_pool_ledger_config(self.pool_name, pool_config)
 
@@ -175,12 +177,12 @@ class IndyLedger(BaseLedger):
         """Open the pool ledger, creating it if necessary."""
         # We only support proto ver 2
         with IndyErrorHandler(
-            "Exception when setting ledger protocol version", LedgerConfigError
+            "Exception setting ledger protocol version", LedgerConfigError
         ):
             await indy.pool.set_protocol_version(2)
 
         with IndyErrorHandler(
-            f"Exception when opening pool ledger {self.pool_name}", LedgerConfigError
+            f"Exception opening pool ledger {self.pool_name}", LedgerConfigError
         ):
             self.pool_handle = await indy.pool.open_pool_ledger(self.pool_name, "{}")
         self.opened = True
@@ -203,11 +205,11 @@ class IndyLedger(BaseLedger):
                 break
 
             if exc:
-                self.logger.error("Exception when closing pool ledger")
+                LOGGER.error("Exception closing pool ledger")
                 self.ref_count += 1  # if we are here, we should have self.ref_lock
                 self.close_task = None
                 raise IndyErrorHandler.wrap_error(
-                    exc, "Exception when closing pool ledger", LedgerError
+                    exc, "Exception closing pool ledger", LedgerError
                 )
 
     async def _context_open(self):
@@ -216,7 +218,7 @@ class IndyLedger(BaseLedger):
             if self.close_task:
                 self.close_task.cancel()
             if not self.opened:
-                self.logger.debug("Opening the pool ledger")
+                LOGGER.debug("Opening the pool ledger")
                 await self.open()
             self.ref_count += 1
 
@@ -228,7 +230,7 @@ class IndyLedger(BaseLedger):
             await asyncio.sleep(timeout)
             async with self.ref_lock:
                 if not self.ref_count:
-                    self.logger.debug("Closing pool ledger after timeout")
+                    LOGGER.debug("Closing pool ledger after timeout")
                     await self.close()
 
         async with self.ref_lock:
@@ -358,7 +360,7 @@ class IndyLedger(BaseLedger):
             public_info.did, schema_name, schema_version, attribute_names
         )
         if schema_info:
-            self.logger.warning("Schema already exists on ledger. Returning details.")
+            LOGGER.warning("Schema already exists on ledger. Returning details.")
             schema_id, schema_def = schema_info
         else:
             if self.read_only:
@@ -367,16 +369,17 @@ class IndyLedger(BaseLedger):
                 )
 
             try:
-                schema_id, schema_json = await issuer.create_and_store_schema(
-                    public_info.did, schema_name, schema_version, attribute_names,
+                schema_id, schema_json = await issuer.create_schema(
+                    public_info.did,
+                    schema_name,
+                    schema_version,
+                    attribute_names,
                 )
             except IssuerError as err:
                 raise LedgerError(err.message) from err
             schema_def = json.loads(schema_json)
 
-            with IndyErrorHandler(
-                "Exception when building schema request", LedgerError
-            ):
+            with IndyErrorHandler("Exception building schema request", LedgerError):
                 request_json = await indy.ledger.build_schema_request(
                     public_info.did, schema_json
                 )
@@ -393,17 +396,16 @@ class IndyLedger(BaseLedger):
                     ) from err
             except LedgerTransactionError as e:
                 # Identify possible duplicate schema errors on indy-node < 1.9 and > 1.9
-                if (
-                    "can have one and only one SCHEMA with name" in e.message
-                    or "UnauthorizedClientRequest" in e.message
-                ):
+                if "can have one and only one SCHEMA with name" in getattr(
+                    e, "message", ""
+                ) or "UnauthorizedClientRequest" in getattr(e, "message", ""):
                     # handle potential race condition if multiple agents are publishing
                     # the same schema simultaneously
                     schema_info = await self.check_existing_schema(
                         public_info.did, schema_name, schema_version, attribute_names
                     )
                     if schema_info:
-                        self.logger.warning(
+                        LOGGER.warning(
                             "Schema already exists on ledger. Returning details."
                             " Error: %s",
                             e,
@@ -412,17 +414,17 @@ class IndyLedger(BaseLedger):
                 else:
                     raise
 
-        schema_id_parts = schema_id.split(":")
-        schema_tags = {
-            "schema_id": schema_id,
-            "schema_issuer_did": public_info.did,
-            "schema_name": schema_id_parts[-2],
-            "schema_version": schema_id_parts[-1],
-            "epoch": str(int(time())),
-        }
-        record = StorageRecord(SCHEMA_SENT_RECORD_TYPE, schema_id, schema_tags)
-        storage = self.get_indy_storage()
-        await storage.add_record(record)
+            schema_id_parts = schema_id.split(":")
+            schema_tags = {
+                "schema_id": schema_id,
+                "schema_issuer_did": public_info.did,
+                "schema_name": schema_id_parts[-2],
+                "schema_version": schema_id_parts[-1],
+                "epoch": str(int(time())),
+            }
+            record = StorageRecord(SCHEMA_SENT_RECORD_TYPE, schema_id, schema_tags)
+            storage = self.get_indy_storage()
+            await storage.add_record(record)
 
         return schema_id, schema_def
 
@@ -481,7 +483,7 @@ class IndyLedger(BaseLedger):
         public_info = await self.wallet.get_public_did()
         public_did = public_info.did if public_info else None
 
-        with IndyErrorHandler("Exception when building schema request", LedgerError):
+        with IndyErrorHandler("Exception building schema request", LedgerError):
             request_json = await indy.ledger.build_get_schema_request(
                 public_did, schema_id
             )
@@ -492,7 +494,7 @@ class IndyLedger(BaseLedger):
             # schema not found
             return None
 
-        with IndyErrorHandler("Exception when parsing schema response", LedgerError):
+        with IndyErrorHandler("Exception parsing schema response", LedgerError):
             _, parsed_schema_json = await indy.ledger.parse_get_schema_response(
                 response_json
             )
@@ -546,7 +548,7 @@ class IndyLedger(BaseLedger):
         signature_type: str = None,
         tag: str = None,
         support_revocation: bool = False,
-    ) -> Tuple[str, dict]:
+    ) -> Tuple[str, dict, bool]:
         """
         Send credential definition to ledger and store relevant key matter in wallet.
 
@@ -556,6 +558,9 @@ class IndyLedger(BaseLedger):
             signature_type: The signature type to use on the credential definition
             tag: Optional tag to distinguish multiple credential definitions
             support_revocation: Optional flag to enable revocation for this cred def
+
+        Returns:
+            Tuple with cred def id, cred def structure, and whether it's novel
 
         """
         public_info = await self.wallet.get_public_did()
@@ -568,6 +573,8 @@ class IndyLedger(BaseLedger):
         if not schema:
             raise LedgerError(f"Ledger {self.pool_name} has no schema {schema_id}")
 
+        novel = False
+
         # check if cred def is on ledger already
         for test_tag in [tag] if tag else ["tag", DEFAULT_CRED_DEF_TAG]:
             credential_definition_id = issuer.make_credential_definition_id(
@@ -577,7 +584,7 @@ class IndyLedger(BaseLedger):
                 credential_definition_id
             )
             if ledger_cred_def:
-                self.logger.warning(
+                LOGGER.warning(
                     "Credential definition %s already exists on ledger %s",
                     credential_definition_id,
                     self.pool_name,
@@ -609,12 +616,17 @@ class IndyLedger(BaseLedger):
                 raise LedgerError(err.message) from err
 
             # Cred def is neither on ledger nor in wallet: create and send it
+            novel = True
             try:
                 (
                     credential_definition_id,
                     credential_definition_json,
                 ) = await issuer.create_and_store_credential_definition(
-                    public_info.did, schema, signature_type, tag, support_revocation,
+                    public_info.did,
+                    schema,
+                    signature_type,
+                    tag,
+                    support_revocation,
                 )
             except IssuerError as err:
                 raise LedgerError(err.message) from err
@@ -624,27 +636,14 @@ class IndyLedger(BaseLedger):
                     "Error cannot write cred def when ledger is in read only mode"
                 )
 
-            wallet_cred_def = json.loads(credential_definition_json)
-            with IndyErrorHandler(
-                "Exception when building cred def request", LedgerError
-            ):
+            with IndyErrorHandler("Exception building cred def request", LedgerError):
                 request_json = await indy.ledger.build_cred_def_request(
                     public_info.did, credential_definition_json
                 )
             await self._submit(request_json, True, sign_did=public_info)
-            ledger_cred_def = await self.fetch_credential_definition(
-                credential_definition_id
-            )
-            assert wallet_cred_def["value"] == ledger_cred_def["value"]
 
-        # Add non-secrets records if not yet present
-        storage = self.get_indy_storage()
-        found = await storage.search_records(
-            type_filter=CRED_DEF_SENT_RECORD_TYPE,
-            tag_query={"cred_def_id": credential_definition_id},
-        ).fetch_all()
-
-        if not found:
+            # Add non-secrets record
+            storage = self.get_indy_storage()
             schema_id_parts = schema_id.split(":")
             cred_def_tags = {
                 "schema_id": schema_id,
@@ -660,7 +659,7 @@ class IndyLedger(BaseLedger):
             )
             await storage.add_record(record)
 
-        return credential_definition_id, json.loads(credential_definition_json)
+        return (credential_definition_id, json.loads(credential_definition_json), novel)
 
     async def get_credential_definition(self, credential_definition_id: str) -> dict:
         """
@@ -691,14 +690,14 @@ class IndyLedger(BaseLedger):
         public_info = await self.wallet.get_public_did()
         public_did = public_info.did if public_info else None
 
-        with IndyErrorHandler("Exception when building cred def request", LedgerError):
+        with IndyErrorHandler("Exception building cred def request", LedgerError):
             request_json = await indy.ledger.build_get_cred_def_request(
                 public_did, credential_definition_id
             )
 
         response_json = await self._submit(request_json, sign_did=public_info)
 
-        with IndyErrorHandler("Exception when parsing cred def response", LedgerError):
+        with IndyErrorHandler("Exception parsing cred def response", LedgerError):
             try:
                 (
                     _,
@@ -747,11 +746,11 @@ class IndyLedger(BaseLedger):
         nym = self.did_to_nym(did)
         public_info = await self.wallet.get_public_did()
         public_did = public_info.did if public_info else None
-        with IndyErrorHandler("Exception when building nym request", LedgerError):
+        with IndyErrorHandler("Exception building nym request", LedgerError):
             request_json = await indy.ledger.build_get_nym_request(public_did, nym)
         response_json = await self._submit(request_json, sign_did=public_info)
         data_json = (json.loads(response_json))["result"]["data"]
-        return json.loads(data_json)["verkey"] if data_json else None
+        return full_verkey(did, json.loads(data_json)["verkey"]) if data_json else None
 
     async def get_all_endpoints_for_did(self, did: str) -> dict:
         """Fetch all endpoints for a ledger DID.
@@ -762,7 +761,7 @@ class IndyLedger(BaseLedger):
         nym = self.did_to_nym(did)
         public_info = await self.wallet.get_public_did()
         public_did = public_info.did if public_info else None
-        with IndyErrorHandler("Exception when building attribute request", LedgerError):
+        with IndyErrorHandler("Exception building attribute request", LedgerError):
             request_json = await indy.ledger.build_get_attrib_request(
                 public_did, nym, "endpoint", None, None
             )
@@ -791,7 +790,7 @@ class IndyLedger(BaseLedger):
         nym = self.did_to_nym(did)
         public_info = await self.wallet.get_public_did()
         public_did = public_info.did if public_info else None
-        with IndyErrorHandler("Exception when building attribute request", LedgerError):
+        with IndyErrorHandler("Exception building attribute request", LedgerError):
             request_json = await indy.ledger.build_get_attrib_request(
                 public_did, nym, "endpoint", None, None
             )
@@ -799,7 +798,7 @@ class IndyLedger(BaseLedger):
         data_json = json.loads(response_json)["result"]["data"]
         if data_json:
             endpoint = json.loads(data_json).get("endpoint", None)
-            address = endpoint.get(endpoint_type.value, None) if endpoint else None
+            address = endpoint.get(endpoint_type.indy, None) if endpoint else None
         else:
             address = None
 
@@ -820,7 +819,7 @@ class IndyLedger(BaseLedger):
 
         all_exist_endpoints = await self.get_all_endpoints_for_did(did)
         exist_endpoint_of_type = (
-            all_exist_endpoints.get(endpoint_type.value, None)
+            all_exist_endpoints.get(endpoint_type.indy, None)
             if all_exist_endpoints
             else None
         )
@@ -834,14 +833,12 @@ class IndyLedger(BaseLedger):
             nym = self.did_to_nym(did)
 
             if all_exist_endpoints:
-                all_exist_endpoints[endpoint_type.value] = endpoint
+                all_exist_endpoints[endpoint_type.indy] = endpoint
                 attr_json = json.dumps({"endpoint": all_exist_endpoints})
             else:
-                attr_json = json.dumps({"endpoint": {endpoint_type.value: endpoint}})
+                attr_json = json.dumps({"endpoint": {endpoint_type.indy: endpoint}})
 
-            with IndyErrorHandler(
-                "Exception when building attribute request", LedgerError
-            ):
+            with IndyErrorHandler("Exception building attribute request", LedgerError):
                 request_json = await indy.ledger.build_attrib_request(
                     nym, nym, None, attr_json, None
                 )
@@ -868,8 +865,37 @@ class IndyLedger(BaseLedger):
 
         public_info = await self.wallet.get_public_did()
         public_did = public_info.did if public_info else None
-        r = await indy.ledger.build_nym_request(public_did, did, verkey, alias, role)
-        await self._submit(r, True, True, sign_did=public_info)
+        with IndyErrorHandler("Exception building nym request", LedgerError):
+            request_json = await indy.ledger.build_nym_request(
+                public_did, did, verkey, alias, role
+            )
+
+        await self._submit(request_json)
+
+        did_info = await self.wallet.get_local_did(did)
+        metadata = {**did_info.metadata, **DIDPosture.POSTED.metadata}
+        await self.wallet.replace_local_did_metadata(did, metadata)
+
+    async def get_nym_role(self, did: str) -> Role:
+        """
+        Return the role of the input public DID's NYM on the ledger.
+
+        Args:
+            did: DID to query for role on the ledger.
+        """
+        public_info = await self.wallet.get_public_did()
+        public_did = public_info.did if public_info else None
+
+        with IndyErrorHandler("Exception building get-nym request", LedgerError):
+            request_json = await indy.ledger.build_get_nym_request(public_did, did)
+
+        response_json = await self._submit(request_json)
+        response = json.loads(response_json)
+        nym_data = json.loads(response["result"]["data"])
+        if not nym_data:
+            raise BadLedgerRequestError(f"DID {did} is not public")
+
+        return Role.get(nym_data["role"])
 
     def nym_to_did(self, nym: str) -> str:
         """Format a nym with the ledger's DID prefix."""
@@ -892,27 +918,31 @@ class IndyLedger(BaseLedger):
 
         # submit to ledger (retain role and alias)
         nym = self.did_to_nym(public_did)
-        with IndyErrorHandler("Exception when building nym request", LedgerError):
+        with IndyErrorHandler("Exception building nym request", LedgerError):
             request_json = await indy.ledger.build_get_nym_request(public_did, nym)
-            response_json = await self._submit(request_json)
-            data = json.loads((json.loads(response_json))["result"]["data"])
-            if not data:
-                raise BadLedgerRequestError(
-                    f"Ledger has no public DID for wallet {self.wallet.name}"
-                )
-            seq_no = data["seqNo"]
+
+        response_json = await self._submit(request_json)
+        data = json.loads((json.loads(response_json))["result"]["data"])
+        if not data:
+            raise BadLedgerRequestError(
+                f"Ledger has no public DID for wallet {self.wallet.name}"
+            )
+        seq_no = data["seqNo"]
+
+        with IndyErrorHandler("Exception building get-txn request", LedgerError):
             txn_req_json = await indy.ledger.build_get_txn_request(None, None, seq_no)
-            txn_resp_json = await self._submit(txn_req_json)
-            txn_resp = json.loads(txn_resp_json)
-            txn_resp_data = txn_resp["result"]["data"]
-            if not txn_resp_data:
-                raise BadLedgerRequestError(
-                    f"Bad or missing ledger NYM transaction for DID {public_did}"
-                )
-            txn_data_data = txn_resp_data["txn"]["data"]
-            role_token = Role.get(txn_data_data.get("role")).token()
-            alias = txn_data_data.get("alias")
-            await self.register_nym(public_did, verkey, role_token, alias)
+
+        txn_resp_json = await self._submit(txn_req_json)
+        txn_resp = json.loads(txn_resp_json)
+        txn_resp_data = txn_resp["result"]["data"]
+        if not txn_resp_data:
+            raise BadLedgerRequestError(
+                f"Bad or missing ledger NYM transaction for DID {public_did}"
+            )
+        txn_data_data = txn_resp_data["txn"]["data"]
+        role_token = Role.get(txn_data_data.get("role")).token()
+        alias = txn_data_data.get("alias")
+        await self.register_nym(public_did, verkey, role_token, alias)
 
         # update wallet
         await self.wallet.rotate_did_keypair_apply(public_did)
@@ -1026,9 +1056,9 @@ class IndyLedger(BaseLedger):
                 found_def_json,
             ) = await indy.ledger.parse_get_revoc_reg_def_response(response_json)
         except IndyError as e:
-            logging.error(
-                f"get_revoc_reg_def failed with revoc_reg_id={revoc_reg_id}. "
-                f"{e.error_code}: {e.message}"
+            LOGGER.error(
+                f"get_revoc_reg_def failed with revoc_reg_id={revoc_reg_id} - "
+                f"{e.error_code}: {getattr(e, 'message', '[no message]')}"
             )
             raise e
 
@@ -1038,15 +1068,23 @@ class IndyLedger(BaseLedger):
     async def get_revoc_reg_entry(self, revoc_reg_id: str, timestamp: int):
         """Get revocation registry entry by revocation registry ID and timestamp."""
         public_info = await self.wallet.get_public_did()
-        fetch_req = await indy.ledger.build_get_revoc_reg_request(
-            public_info and public_info.did, revoc_reg_id, timestamp
-        )
-        response_json = await self._submit(fetch_req, sign_did=public_info)
-        (
-            found_id,
-            found_reg_json,
-            ledger_timestamp,
-        ) = await indy.ledger.parse_get_revoc_reg_response(response_json)
+        with IndyErrorHandler("Exception fetching rev reg entry", LedgerError):
+            try:
+                fetch_req = await indy.ledger.build_get_revoc_reg_request(
+                    public_info and public_info.did, revoc_reg_id, timestamp
+                )
+                response_json = await self._submit(fetch_req, sign_did=public_info)
+                (
+                    found_id,
+                    found_reg_json,
+                    ledger_timestamp,
+                ) = await indy.ledger.parse_get_revoc_reg_response(response_json)
+            except IndyError as e:
+                LOGGER.error(
+                    f"get_revoc_reg_entry failed with revoc_reg_id={revoc_reg_id} - "
+                    f"{e.error_code}: {getattr(e, 'message', '[no message]')}"
+                )
+                raise e
         assert found_id == revoc_reg_id
         return json.loads(found_reg_json), ledger_timestamp
 
@@ -1057,24 +1095,35 @@ class IndyLedger(BaseLedger):
         Look up a revocation registry delta by ID.
 
         :param revoc_reg_id revocation registry id
-        :param timestamp_from from time. a total number of seconds from Unix Epoch
-        :param timestamp_to to time. a total number of seconds from Unix Epoch
+        :param timestamp_from earliest EPOCH time of interest
+        :param timestamp_to latest EPOCH time of interest
 
         :returns delta response, delta timestamp
         """
         if timestamp_to is None:
             timestamp_to = int(time())
         public_info = await self.wallet.get_public_did()
-        fetch_req = await indy.ledger.build_get_revoc_reg_delta_request(
-            public_info and public_info.did, revoc_reg_id, timestamp_from, timestamp_to
-        )
+        with IndyErrorHandler("Exception building rev reg delta request", LedgerError):
+            fetch_req = await indy.ledger.build_get_revoc_reg_delta_request(
+                public_info and public_info.did,
+                revoc_reg_id,
+                timestamp_from,
+                timestamp_to,
+            )
         response_json = await self._submit(fetch_req, sign_did=public_info)
-        (
-            found_id,
-            found_delta_json,
-            delta_timestamp,
-        ) = await indy.ledger.parse_get_revoc_reg_delta_response(response_json)
-        assert found_id == revoc_reg_id
+        with IndyErrorHandler(
+            (
+                "Exception parsing rev reg delta response "
+                "(interval ends before rev reg creation?)"
+            ),
+            LedgerError,
+        ):
+            (
+                found_id,
+                found_delta_json,
+                delta_timestamp,
+            ) = await indy.ledger.parse_get_revoc_reg_delta_response(response_json)
+            assert found_id == revoc_reg_id
         return json.loads(found_delta_json), delta_timestamp
 
     async def send_revoc_reg_def(self, revoc_reg_def: dict, issuer_did: str = None):
@@ -1088,9 +1137,10 @@ class IndyLedger(BaseLedger):
             raise LedgerTransactionError(
                 "No issuer DID found for revocation registry definition"
             )
-        request_json = await indy.ledger.build_revoc_reg_def_request(
-            did_info.did, json.dumps(revoc_reg_def)
-        )
+        with IndyErrorHandler("Exception building rev reg def", LedgerError):
+            request_json = await indy.ledger.build_revoc_reg_def_request(
+                did_info.did, json.dumps(revoc_reg_def)
+            )
         await self._submit(request_json, True, True, did_info)
 
     async def send_revoc_reg_entry(
@@ -1109,7 +1159,8 @@ class IndyLedger(BaseLedger):
             raise LedgerTransactionError(
                 "No issuer DID found for revocation registry entry"
             )
-        request_json = await indy.ledger.build_revoc_reg_entry_request(
-            did_info.did, revoc_reg_id, revoc_def_type, json.dumps(revoc_reg_entry)
-        )
+        with IndyErrorHandler("Exception building rev reg entry", LedgerError):
+            request_json = await indy.ledger.build_revoc_reg_entry_request(
+                did_info.did, revoc_reg_id, revoc_def_type, json.dumps(revoc_reg_entry)
+            )
         await self._submit(request_json, True, True, did_info)

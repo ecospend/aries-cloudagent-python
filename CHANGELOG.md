@@ -1,3 +1,49 @@
+# 0.5.6
+
+## October 19, 2020
+
+- Fix an attempt to update the agent endpoint when configured with a read-only ledger [#758](https://github.com/hyperledger/aries-cloudagent-python/pull/758)
+
+# 0.5.5
+
+## October 9, 2020
+
+- Support interactions using the new `https://didcomm.org` message type prefix (currently opt-in via the `--emit-new-didcomm-prefix` flag) [#705](https://github.com/hyperledger/aries-cloudagent-python/pull/705), [#713](https://github.com/hyperledger/aries-cloudagent-python/pull/713)
+- Updates to application startup arguments, adding support for YAML configuration [#739](https://github.com/hyperledger/aries-cloudagent-python/pull/739), [#746](https://github.com/hyperledger/aries-cloudagent-python/pull/746), [#748](https://github.com/hyperledger/aries-cloudagent-python/pull/748)
+- Add a new endpoint to check the revocation status of a stored credential [#735](https://github.com/hyperledger/aries-cloudagent-python/pull/735)
+- Clean up API documentation and OpenAPI definition, minor API adjustments [#712](https://github.com/hyperledger/aries-cloudagent-python/pull/712), [#726](https://github.com/hyperledger/aries-cloudagent-python/pull/726), [#732](https://github.com/hyperledger/aries-cloudagent-python/pull/732), [#734](https://github.com/hyperledger/aries-cloudagent-python/pull/734), [#738](https://github.com/hyperledger/aries-cloudagent-python/pull/738), [#741](https://github.com/hyperledger/aries-cloudagent-python/pull/741), [#747](https://github.com/hyperledger/aries-cloudagent-python/pull/747)
+- Add configurable support for unencrypted record tags [#723](https://github.com/hyperledger/aries-cloudagent-python/pull/723)
+- Retain more limited records on issued credentials [#718](https://github.com/hyperledger/aries-cloudagent-python/pull/718)
+- Fix handling of custom endpoint in connections `accept-request` API method [#715](https://github.com/hyperledger/aries-cloudagent-python/pull/715),
+  [#716](https://github.com/hyperledger/aries-cloudagent-python/pull/716)
+- Add restrictions around revocation registry sizes [#727](https://github.com/hyperledger/aries-cloudagent-python/pull/727)
+- Allow the state for revocation registry records to be set manually [#708](https://github.com/hyperledger/aries-cloudagent-python/pull/708)
+- Handle multiple matching credentials when satisfying a presentation request using `names` [#706](https://github.com/hyperledger/aries-cloudagent-python/pull/706)
+- Additional handling for a missing local tails file, tails file rollover process [#702](https://github.com/hyperledger/aries-cloudagent-python/pull/702), [#717](https://github.com/hyperledger/aries-cloudagent-python/pull/717)
+- Handle unknown credential ID in `create-proof` API method [#700](https://github.com/hyperledger/aries-cloudagent-python/pull/700)
+- Improvements to revocation interval handling in presentation requests [#699](https://github.com/hyperledger/aries-cloudagent-python/pull/699), [#703](https://github.com/hyperledger/aries-cloudagent-python/pull/703)
+- Clean up warnings on API redirects [#692](https://github.com/hyperledger/aries-cloudagent-python/pull/692)
+- Extensions to DID publicity status [#691](https://github.com/hyperledger/aries-cloudagent-python/pull/691)
+- Support Unicode text in JSON-LD credential handling [#687](https://github.com/hyperledger/aries-cloudagent-python/pull/687)
+
+# 0.5.4
+
+## August 24, 2020
+
+- Improvements to schema, cred def registration procedure [#682](https://github.com/hyperledger/aries-cloudagent-python/pull/682), [#683](https://github.com/hyperledger/aries-cloudagent-python/pull/683)
+- Updates to align admin API output with documented interface [#674](https://github.com/hyperledger/aries-cloudagent-python/pull/674), [#681](https://github.com/hyperledger/aries-cloudagent-python/pull/681)
+- Fix provisioning issue when ledger is configured as read-only [#673](https://github.com/hyperledger/aries-cloudagent-python/pull/673)
+- Add `get-nym-role` action [#671](https://github.com/hyperledger/aries-cloudagent-python/pull/671)
+- Basic support for w3c profile endpoint [#667](https://github.com/hyperledger/aries-cloudagent-python/pull/667), [#669](https://github.com/hyperledger/aries-cloudagent-python/pull/669)
+- Improve handling of non-revocation interval [#648](https://github.com/hyperledger/aries-cloudagent-python/pull/648), [#680](https://github.com/hyperledger/aries-cloudagent-python/pull/680)
+- Update revocation demo after changes to tails file handling [#644](https://github.com/hyperledger/aries-cloudagent-python/pull/644)
+- Improve handling of fatal ledger errors [#643](https://github.com/hyperledger/aries-cloudagent-python/pull/643), [#659](https://github.com/hyperledger/aries-cloudagent-python/pull/659)
+- Improve `did:key:` handling in out-of-band protocol support [#639](https://github.com/hyperledger/aries-cloudagent-python/pull/639)
+- Fix crash when no public DID is configured [#637](https://github.com/hyperledger/aries-cloudagent-python/pull/637)
+- Fix high CPU usage when only messages pending retry are in the outbound queue [#636](https://github.com/hyperledger/aries-cloudagent-python/pull/636)
+- Additional unit tests for config, messaging, revocation, startup, transports [#633](https://github.com/hyperledger/aries-cloudagent-python/pull/633), [#641](https://github.com/hyperledger/aries-cloudagent-python/pull/641), [#658](https://github.com/hyperledger/aries-cloudagent-python/pull/658), [#661](https://github.com/hyperledger/aries-cloudagent-python/pull/661), [#666](https://github.com/hyperledger/aries-cloudagent-python/pull/666)
+- Allow forwarded messages to use existing connections and the outbound queue [#631](https://github.com/hyperledger/aries-cloudagent-python/pull/631)
+
 # 0.5.3
 
 ## July 23, 2020
