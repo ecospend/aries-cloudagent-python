@@ -8,18 +8,22 @@ import indy.anoncreds
 import indy.blob_storage
 from indy.error import AnoncredsRevocationRegistryFullError, IndyError, ErrorCode
 
+from ..config.injection_context import InjectionContext
+from ..indy import create_tails_reader, create_tails_writer
+from ..indy.error import IndyErrorHandler
 from ..messaging.util import encode
+from ..revocation.models.issuer_cred_rev_record import IssuerCredRevRecord
+from ..storage.base import BaseStorage
+from ..storage.error import StorageError
+from ..storage.indy import IndyStorage
 
 from .base import (
     BaseIssuer,
     IssuerError,
     IssuerRevocationRegistryFullError,
     DEFAULT_CRED_DEF_TAG,
-    DEFAULT_ISSUANCE_TYPE,
     DEFAULT_SIGNATURE_TYPE,
 )
-from ..indy import create_tails_reader, create_tails_writer
-from ..indy.error import IndyErrorHandler
 
 
 class IndyIssuer(BaseIssuer):
@@ -36,13 +40,16 @@ class IndyIssuer(BaseIssuer):
         self.logger = logging.getLogger(__name__)
         self.wallet = wallet
 
+        self.context = InjectionContext(enforce_typing=False)
+        self.context.injector.bind_instance(BaseStorage, IndyStorage(self.wallet))
+
     def make_schema_id(
         self, origin_did: str, schema_name: str, schema_version: str
     ) -> str:
         """Derive the ID for a schema."""
         return f"{origin_did}:2:{schema_name}:{schema_version}"
 
-    async def create_and_store_schema(
+    async def create_schema(
         self,
         origin_did: str,
         schema_name: str,
@@ -50,7 +57,7 @@ class IndyIssuer(BaseIssuer):
         attribute_names: Sequence[str],
     ) -> Tuple[str, str]:
         """
-        Create a new credential schema and store it in the wallet.
+        Create a new credential schema.
 
         Args:
             origin_did: the DID issuing the credential definition
@@ -65,7 +72,10 @@ class IndyIssuer(BaseIssuer):
 
         with IndyErrorHandler("Error when creating schema", IssuerError):
             schema_id, schema_json = await indy.anoncreds.issuer_create_schema(
-                origin_did, schema_name, schema_version, json.dumps(attribute_names),
+                origin_did,
+                schema_name,
+                schema_version,
+                json.dumps(attribute_names),
             )
         return (schema_id, schema_json)
 
@@ -91,16 +101,16 @@ class IndyIssuer(BaseIssuer):
                 self.wallet.handle, credential_definition_id
             )
             return True
-        except IndyError as error:
-            if error.error_code not in (
+        except IndyError as err:
+            if err.error_code not in (
                 ErrorCode.CommonInvalidStructure,
                 ErrorCode.WalletItemNotFound,
             ):
                 raise IndyErrorHandler.wrap_error(
-                    error,
+                    err,
                     "Error when checking wallet for credential definition",
                     IssuerError,
-                ) from error
+                ) from err
             # recognized error signifies no such cred def in wallet: pass
         return False
 
@@ -165,7 +175,8 @@ class IndyIssuer(BaseIssuer):
         credential_offer: dict,
         credential_request: dict,
         credential_values: dict,
-        revoc_reg_id: str = None,
+        cred_ex_id: str,
+        rev_reg_id: str = None,
         tails_file_path: str = None,
     ) -> Tuple[str, str]:
         """
@@ -176,7 +187,8 @@ class IndyIssuer(BaseIssuer):
             credential_offer: Credential Offer to create credential for
             credential_request: Credential request to create credential for
             credential_values: Values to go in credential
-            revoc_reg_id: ID of the revocation registry
+            cred_ex_id: credential exchange identifier to use in issuer cred rev rec
+            rev_reg_id: ID of the revocation registry
             tails_file_path: Path to the local tails file
 
         Returns:
@@ -210,54 +222,125 @@ class IndyIssuer(BaseIssuer):
         try:
             (
                 credential_json,
-                credential_revocation_id,
-                revoc_reg_delta_json,
+                cred_rev_id,
+                _,  # rev_reg_delta_json only for ISSUANCE_ON_DEMAND, excluded by design
             ) = await indy.anoncreds.issuer_create_credential(
                 self.wallet.handle,
                 json.dumps(credential_offer),
                 json.dumps(credential_request),
                 json.dumps(encoded_values),
-                revoc_reg_id,
+                rev_reg_id,
                 tails_reader_handle,
             )
+
+            if cred_rev_id:
+                issuer_cr_rec = IssuerCredRevRecord(
+                    state=IssuerCredRevRecord.STATE_ISSUED,
+                    cred_ex_id=cred_ex_id,
+                    rev_reg_id=rev_reg_id,
+                    cred_rev_id=cred_rev_id,
+                )
+                await issuer_cr_rec.save(
+                    self.context,
+                    reason=(
+                        "Created issuer cred rev record for "
+                        f"rev reg id {rev_reg_id}, {cred_rev_id}"
+                    ),
+                )
         except AnoncredsRevocationRegistryFullError:
-            self.logger.error(
-                f"Revocation registry {revoc_reg_id} is full: cannot create credential"
+            self.logger.warning(
+                "Revocation registry %s is full: cannot create credential",
+                rev_reg_id,
             )
             raise IssuerRevocationRegistryFullError(
-                f"Revocation registry {revoc_reg_id} full"
+                f"Revocation registry {rev_reg_id} is full"
             )
-        except IndyError as error:
+        except IndyError as err:
             raise IndyErrorHandler.wrap_error(
-                error, "Error when issuing credential", IssuerError
-            ) from error
+                err, "Error when issuing credential", IssuerError
+            ) from err
+        except StorageError as err:
+            self.logger.warning(
+                (
+                    "Created issuer cred rev record for "
+                    "Could not store issuer cred rev record for "
+                    "rev reg id %s, cred rev id %s: %s"
+                ),
+                rev_reg_id,
+                cred_rev_id,
+                err.roll_up,
+            )
 
-        return credential_json, credential_revocation_id
+        return (credential_json, cred_rev_id)
 
     async def revoke_credentials(
-        self, revoc_reg_id: str, tails_file_path: str, cred_revoc_ids: Sequence[str]
-    ) -> str:
+        self, rev_reg_id: str, tails_file_path: str, cred_rev_ids: Sequence[str]
+    ) -> (str, Sequence[str]):
         """
         Revoke a set of credentials in a revocation registry.
 
         Args:
-            revoc_reg_id: ID of the revocation registry
+            rev_reg_id: ID of the revocation registry
             tails_file_path: path to the local tails file
-            cred_revoc_ids: sequences of credential indexes in the revocation registry
+            cred_rev_ids: sequences of credential indexes in the revocation registry
 
         Returns:
-            the combined revocation delta
+            Tuple with the combined revocation delta, list of cred rev ids not revoked
 
         """
+        failed_crids = []
         tails_reader_handle = await create_tails_reader(tails_file_path)
 
         result_json = None
-        for cred_revoc_id in cred_revoc_ids:
+        for cred_rev_id in cred_rev_ids:
             with IndyErrorHandler("Exception when revoking credential", IssuerError):
-                # may throw AnoncredsInvalidUserRevocId if using ISSUANCE_ON_DEMAND
-                delta_json = await indy.anoncreds.issuer_revoke_credential(
-                    self.wallet.handle, tails_reader_handle, revoc_reg_id, cred_revoc_id
-                )
+                try:
+                    delta_json = await indy.anoncreds.issuer_revoke_credential(
+                        self.wallet.handle,
+                        tails_reader_handle,
+                        rev_reg_id,
+                        cred_rev_id,
+                    )
+                    issuer_cr_rec = await IssuerCredRevRecord.retrieve_by_ids(
+                        self.context,
+                        rev_reg_id,
+                        cred_rev_id,
+                    )
+                    await issuer_cr_rec.set_state(
+                        self.context, IssuerCredRevRecord.STATE_REVOKED
+                    )
+
+                except IndyError as err:
+                    if err.error_code == ErrorCode.AnoncredsInvalidUserRevocId:
+                        self.logger.error(
+                            (
+                                "Abstaining from revoking credential on "
+                                "rev reg id %s, cred rev id=%s: "
+                                "already revoked or not yet issued"
+                            ),
+                            rev_reg_id,
+                            cred_rev_id,
+                        )
+                    else:
+                        self.logger.error(
+                            IndyErrorHandler.wrap_error(
+                                err, "Revocation error", IssuerError
+                            ).roll_up
+                        )
+                    failed_crids.append(cred_rev_id)
+                    continue
+                except StorageError as err:
+                    self.logger.warning(
+                        (
+                            "Revoked credential on rev reg id %s, cred rev id %s "
+                            "without corresponding issuer cred rev record: %s"
+                        ),
+                        rev_reg_id,
+                        cred_rev_id,
+                        err.roll_up,
+                    )
+                    # carry on with delta merge; record is best-effort
+
                 if result_json:
                     result_json = await self.merge_revocation_registry_deltas(
                         result_json, delta_json
@@ -265,7 +348,7 @@ class IndyIssuer(BaseIssuer):
                 else:
                     result_json = delta_json
 
-        return result_json
+        return (result_json, failed_crids)
 
     async def merge_revocation_registry_deltas(
         self, fro_delta: str, to_delta: str
@@ -294,7 +377,6 @@ class IndyIssuer(BaseIssuer):
         tag: str,
         max_cred_num: int,
         tails_base_path: str,
-        issuance_type: str = None,
     ) -> Tuple[str, str, str]:
         """
         Create a new revocation registry and store it in the wallet.
@@ -306,7 +388,6 @@ class IndyIssuer(BaseIssuer):
             tag: the unique revocation registry tag
             max_cred_num: the number of credentials supported in the registry
             tails_base_path: where to store the tails file
-            issuance_type: optionally override the issuance type
 
         Returns:
             A tuple of the revocation registry ID, JSON, and entry JSON
@@ -319,9 +400,9 @@ class IndyIssuer(BaseIssuer):
             "Exception when creating revocation registry", IssuerError
         ):
             (
-                revoc_reg_id,
-                revoc_reg_def_json,
-                revoc_reg_entry_json,
+                rev_reg_id,
+                rev_reg_def_json,
+                rev_reg_entry_json,
             ) = await indy.anoncreds.issuer_create_and_store_revoc_reg(
                 self.wallet.handle,
                 origin_did,
@@ -330,10 +411,10 @@ class IndyIssuer(BaseIssuer):
                 cred_def_id,
                 json.dumps(
                     {
+                        "issuance_type": "ISSUANCE_BY_DEFAULT",
                         "max_cred_num": max_cred_num,
-                        "issuance_type": issuance_type or DEFAULT_ISSUANCE_TYPE,
                     }
                 ),
                 tails_writer,
             )
-        return (revoc_reg_id, revoc_reg_def_json, revoc_reg_entry_json)
+        return (rev_reg_id, rev_reg_def_json, rev_reg_entry_json)

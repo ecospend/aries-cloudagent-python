@@ -13,25 +13,22 @@ from typing import Callable, Coroutine, Union
 from aiohttp.web import HTTPException
 
 from ..config.injection_context import InjectionContext
-from ..core.protocol_registry import ProtocolRegistry
 from ..messaging.agent_message import AgentMessage
 from ..messaging.error import MessageParseError
 from ..messaging.models.base import BaseModelError
 from ..messaging.request_context import RequestContext
 from ..messaging.responder import BaseResponder
 from ..messaging.util import datetime_now
-from .error import ProtocolMinorVersionNotSupported
-
-# FIXME: We shouldn't rely on a hardcoded message version here.
 from ..protocols.connections.v1_0.manager import ConnectionManager
 from ..protocols.problem_report.v1_0.message import ProblemReport
-
 from ..transport.inbound.message import InboundMessage
 from ..transport.outbound.message import OutboundMessage
 from ..utils.stats import Collector
 from ..utils.task_queue import CompletedTask, PendingTask, TaskQueue
-
 from ..utils.tracing import trace_event, get_timer
+
+from .error import ProtocolMinorVersionNotSupported
+from .protocol_registry import ProtocolRegistry
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,7 +78,7 @@ class Dispatcher:
             timing = task.timing
             if "queued" in timing:
                 self.collector.log(
-                    f"Dispatcher:queued", timing["unqueued"] - timing["queued"]
+                    "Dispatcher:queued", timing["unqueued"] - timing["queued"]
                 )
             if task.ident:
                 self.collector.log(task.ident, timing["ended"] - timing["started"])
@@ -148,7 +145,9 @@ class Dispatcher:
             message = None
 
         trace_event(
-            self.context.settings, message, outcome="Dispatcher.handle_message.START",
+            self.context.settings,
+            message,
+            outcome="Dispatcher.handle_message.START",
         )
 
         context = RequestContext(base_context=self.context)

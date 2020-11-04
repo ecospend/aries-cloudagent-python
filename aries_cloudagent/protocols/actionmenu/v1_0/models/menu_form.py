@@ -2,9 +2,9 @@
 
 from typing import Sequence
 
-from marshmallow import fields
+from marshmallow import EXCLUDE, fields
 
-from aries_cloudagent.messaging.models.base import BaseModel, BaseModelSchema
+from .....messaging.models.base import BaseModel, BaseModelSchema
 
 from .menu_form_param import MenuFormParam, MenuFormParamSchema
 
@@ -47,9 +47,12 @@ class MenuFormSchema(BaseModelSchema):
         """MenuFormSchema metadata."""
 
         model_class = MenuForm
+        unknown = EXCLUDE
 
     title = fields.Str(
-        required=False, description="Menu form title", example="Preferences",
+        required=False,
+        description="Menu form title",
+        example="Preferences",
     )
     description = fields.Str(
         required=False,
@@ -60,7 +63,6 @@ class MenuFormSchema(BaseModelSchema):
         fields.Nested(MenuFormParamSchema()),
         required=False,
         description="List of form parameters",
-        example="[alpha, x_offset, y_offset, height, width, bgcolor, fgcolor]",
     )
     submit_label = fields.Str(
         required=False,

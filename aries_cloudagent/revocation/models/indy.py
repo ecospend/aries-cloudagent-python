@@ -50,7 +50,7 @@ class NonRevocationIntervalSchema(BaseModelSchema):
     """Schema to allow serialization/deserialization of non-revocation intervals."""
 
     class Meta:
-        """NonRevocationIntervalchema metadata."""
+        """NonRevocationIntervalSchema metadata."""
 
         model_class = NonRevocationInterval
 
@@ -58,10 +58,12 @@ class NonRevocationIntervalSchema(BaseModelSchema):
         required=False,
         description="Earliest time of interest in non-revocation interval",
         data_key="from",
+        strict=True,
         **INT_EPOCH
     )
     to = fields.Int(
         required=False,
         description="Latest time of interest in non-revocation interval",
+        strict=True,
         **INT_EPOCH
     )

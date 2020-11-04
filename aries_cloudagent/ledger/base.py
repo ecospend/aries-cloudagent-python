@@ -1,10 +1,13 @@
 """Ledger base class."""
 
-from abc import ABC, abstractmethod, ABCMeta
 import re
+
+from abc import ABC, abstractmethod, ABCMeta
 from typing import Tuple, Sequence
 
 from ..issuer.base import BaseIssuer
+
+from .endpoint_type import EndpointType
 
 
 class BaseLedger(ABC, metaclass=ABCMeta):
@@ -25,6 +28,11 @@ class BaseLedger(ABC, metaclass=ABCMeta):
     async def __aexit__(self, exc_type, exc, tb):
         """Context manager exit."""
 
+    @property
+    @abstractmethod
+    def type(self) -> str:
+        """Accessor for the ledger type."""
+
     @abstractmethod
     async def get_key_for_did(self, did: str) -> str:
         """Fetch the verkey for a ledger DID.
@@ -34,20 +42,29 @@ class BaseLedger(ABC, metaclass=ABCMeta):
         """
 
     @abstractmethod
-    async def get_endpoint_for_did(self, did: str) -> str:
+    async def get_endpoint_for_did(
+        self, did: str, endpoint_type: EndpointType = EndpointType.ENDPOINT
+    ) -> str:
         """Fetch the endpoint for a ledger DID.
 
         Args:
             did: The DID to look up on the ledger or in the cache
+            endpoint_type: The type of the endpoint (default 'endpoint')
         """
 
     @abstractmethod
-    async def update_endpoint_for_did(self, did: str, endpoint: str) -> bool:
+    async def update_endpoint_for_did(
+        self,
+        did: str,
+        endpoint: str,
+        endpoint_type: EndpointType = EndpointType.ENDPOINT,
+    ) -> bool:
         """Check and update the endpoint on the ledger.
 
         Args:
             did: The ledger DID
             endpoint: The endpoint address
+            endpoint_type: The type of the endpoint (default 'endpoint')
         """
 
     @abstractmethod
@@ -65,8 +82,26 @@ class BaseLedger(ABC, metaclass=ABCMeta):
         """
 
     @abstractmethod
+    async def get_nym_role(self, did: str):
+        """
+        Return the role registered to input public DID on the ledger.
+
+        Args:
+            did: DID to register on the ledger.
+        """
+
+    @abstractmethod
     def nym_to_did(self, nym: str) -> str:
         """Format a nym with the ledger's DID prefix."""
+
+    @abstractmethod
+    async def rotate_public_did_keypair(self, next_seed: str = None) -> None:
+        """
+        Rotate keypair for public DID: create new key, submit to ledger, update wallet.
+
+        Args:
+            next_seed: seed for incoming ed25519 keypair (default random)
+        """
 
     def did_to_nym(self, did: str) -> str:
         """Remove the ledger's DID prefix to produce a nym."""
@@ -135,7 +170,7 @@ class BaseLedger(ABC, metaclass=ABCMeta):
         signature_type: str = None,
         tag: str = None,
         support_revocation: bool = False,
-    ) -> Tuple[str, dict]:
+    ) -> Tuple[str, dict, bool]:
         """
         Send credential definition to ledger and store relevant key matter in wallet.
 
@@ -145,6 +180,9 @@ class BaseLedger(ABC, metaclass=ABCMeta):
             signature_type: The signature type to use on the credential definition
             tag: Optional tag to distinguish multiple credential definitions
             support_revocation: Optional flag to enable revocation for this cred def
+
+        Returns:
+            Tuple with cred def id, cred def structure, and whether it's novel
 
         """
 

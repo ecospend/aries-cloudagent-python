@@ -1,5 +1,9 @@
-from marshmallow import ValidationError
+import json
+import pytest
+
 from unittest import TestCase
+
+from marshmallow import ValidationError
 
 from ..valid import (
     BASE58_SHA256_HASH,
@@ -7,33 +11,72 @@ from ..valid import (
     BASE64URL,
     BASE64URL_NO_PAD,
     DID_KEY,
+    DID_POSTURE,
+    ENDPOINT,
+    ENDPOINT_TYPE,
     INDY_CRED_DEF_ID,
+    INDY_CRED_REV_ID,
     INDY_DID,
+    INDY_EXTRA_WQL,
     INDY_ISO8601_DATETIME,
     INDY_PREDICATE,
     INDY_RAW_PUBLIC_KEY,
     INDY_REV_REG_ID,
+    INDY_REV_REG_SIZE,
     INDY_SCHEMA_ID,
     INDY_VERSION,
+    INDY_WQL,
     INT_EPOCH,
+    NATURAL_NUM,
     JWS_HEADER_KID,
     JWT,
     SHA256,
     UUID4,
+    WHOLE_NUM,
 )
 
 
 class TestValid(TestCase):
     def test_epoch(self):
-        non_epochs = [-9223372036854775809, 9223372036854775808]
+        non_epochs = [-1, 18446744073709551616]
         for non_epoch in non_epochs:
             with self.assertRaises(ValidationError):
                 INT_EPOCH["validate"](non_epoch)
 
         INT_EPOCH["validate"](0)
         INT_EPOCH["validate"](2147483647)
-        INT_EPOCH["validate"](-9223372036854775808)
-        INT_EPOCH["validate"](9223372036854775807)
+        INT_EPOCH["validate"](18446744073709551615)
+
+    def test_whole(self):
+        non_wholes = [-9223372036854775809, 2.3, "Hello", None]
+        for non_whole in non_wholes:
+            with self.assertRaises(ValidationError):
+                WHOLE_NUM["validate"](non_whole)
+
+        WHOLE_NUM["validate"](0)
+        WHOLE_NUM["validate"](1)
+        WHOLE_NUM["validate"](12345678901234567890)
+
+    def test_natural(self):
+        non_naturals = [-9223372036854775809, 2.3, "Hello", 0, None]
+        for non_natural in non_naturals:
+            with self.assertRaises(ValidationError):
+                NATURAL_NUM["validate"](non_natural)
+
+        NATURAL_NUM["validate"](1)
+        NATURAL_NUM["validate"](2)
+        NATURAL_NUM["validate"](12345678901234567890)
+
+    def test_indy_rev_reg_size(self):
+        non_indy_rr_sizes = [-9223372036854775809, 2.3, "Hello", 0, 3, 32769, None]
+        for non_indy_rr_size in non_indy_rr_sizes:
+            with self.assertRaises(ValidationError):
+                INDY_REV_REG_SIZE["validate"](non_indy_rr_size)
+
+        INDY_REV_REG_SIZE["validate"](4)
+        INDY_REV_REG_SIZE["validate"](5)
+        INDY_REV_REG_SIZE["validate"](32767)
+        INDY_REV_REG_SIZE["validate"](32768)
 
     def test_indy_did(self):
         non_indy_dids = [
@@ -114,6 +157,22 @@ class TestValid(TestCase):
 
         DID_KEY["validate"]("did:key:zQ4zqM7aXqm7gDQkUVLng9h")
 
+    def test_did_posture(self):
+        non_did_postures = [
+            "not-me",
+            None,
+            "PUBLIC",
+            "Posted",
+            "wallet only",
+        ]
+        for non_did_posture in non_did_postures:
+            with self.assertRaises(ValidationError):
+                DID_POSTURE["validate"](non_did_posture)
+
+        DID_POSTURE["validate"]("public")
+        DID_POSTURE["validate"]("posted")
+        DID_POSTURE["validate"]("wallet_only")
+
     def test_indy_base58_sha256_hash(self):
         non_base58_sha256_hashes = [
             "Q4zqM7aXqm7gDQkUVLng9JQ4zqM7aXqm7gDQkUVLng9I",  # 'I' not a base58 char
@@ -170,6 +229,15 @@ class TestValid(TestCase):
             "WgWxqztrNooG92RXvxSTWv:4:WgWxqztrNooG92RXvxSTWv:3:CL:"
             "Q4zqM7aXqm7gDQkUVLng9h:2:bc-reg:1.0:tag:CL_ACCUM:0"
         )  # long
+
+    def test_cred_rev_id(self):
+        non_cred_rev_ids = ["Wg", "0", "-5", "3.14"]
+        for non_cred_rev_id in non_cred_rev_ids:
+            with self.assertRaises(ValidationError):
+                INDY_CRED_REV_ID["validate"](non_cred_rev_id)
+
+        INDY_CRED_REV_ID["validate"]("1")
+        INDY_CRED_REV_ID["validate"]("99999999")
 
     def test_version(self):
         non_versions = ["-1", "", "3_5", "3.5a"]
@@ -232,6 +300,59 @@ class TestValid(TestCase):
         INDY_ISO8601_DATETIME["validate"]("2020-01-01 00:00-00:00")
         INDY_ISO8601_DATETIME["validate"]("2020-01-01 00:00:00.1-00:00")
         INDY_ISO8601_DATETIME["validate"]("2020-01-01 00:00:00.123456-00:00")
+
+    def test_indy_wql(self):
+        non_wqls = [
+            "nope",
+            "[a, b, c]",
+            "{1, 2, 3}",
+            set(),
+            '"Hello World"',
+            None,
+            "null",
+            "true",
+            False,
+        ]
+        for non_wql in non_wqls:
+            with self.assertRaises(ValidationError):
+                INDY_WQL["validate"](non_wql)
+
+        INDY_WQL["validate"](json.dumps({}))
+        INDY_WQL["validate"](json.dumps({"a": "1234"}))
+        INDY_WQL["validate"](json.dumps({"a": "1234", "b": {"$not": "0"}}))
+        INDY_WQL["validate"](json.dumps({"$or": {"a": "1234", "b": "0"}}))
+
+    def test_indy_extra_wql(self):
+        non_xwqls = [
+            "nope",
+            "[a, b, c]",
+            "{1, 2, 3}",
+            set(),
+            '"Hello World"',
+            None,
+            "null",
+            "true",
+            False,
+            "{}",
+            '{"no": "referent"}',
+            '{"no": "referent", "another": "non-referent"}',
+            '{"uuid": {"too many: "braces"}}}',
+        ]
+        for non_xwql in non_xwqls:
+            with self.assertRaises(ValidationError):
+                INDY_EXTRA_WQL["validate"](non_xwql)
+
+        INDY_EXTRA_WQL["validate"](json.dumps({"uuid0": {"name::ident::marker": "1"}}))
+        INDY_EXTRA_WQL["validate"](
+            json.dumps(
+                {
+                    "uuid0": {"attr::ident::marker": "1"},
+                    "uuid1": {"attr::member::value": "655321"},
+                    "uuid2": {"attr::code::value": {"$in": ["abc", "def", "ghi"]}},
+                    "uuid3": {"attr::score::value": {"$neq": "0"}},
+                }
+            )
+        )
 
     def test_base64(self):
         non_base64s = [
@@ -313,3 +434,43 @@ class TestValid(TestCase):
 
         UUID4["validate"]("3fa85f64-5717-4562-b3fc-2c963f66afa6")
         UUID4["validate"]("3FA85F64-5717-4562-B3FC-2C963F66AFA6")  # upper case OK
+
+    def test_endpoint(self):
+        non_endpoints = [
+            "123",
+            "",
+            "/path/only",
+            "https://1.2.3.4?query=true&url=false",
+            "http://no_tld/bad",
+            "no-proto:8080/my/path",
+            "smtp:8080/my/path#fragment",
+        ]
+
+        for non_endpoint in non_endpoints:
+            with self.assertRaises(ValidationError):
+                ENDPOINT["validate"](non_endpoint)
+
+        ENDPOINT["validate"]("http://github.com")
+        ENDPOINT["validate"]("https://localhost:8080")
+        ENDPOINT["validate"]("newproto://myhost.ca:8080/path")
+        ENDPOINT["validate"]("ftp://10.10.100.90:8021")
+        ENDPOINT["validate"]("zzzp://someplace.ca:9999/path")
+
+    def test_endpoint_type(self):
+        non_endpoint_types = [
+            "123",
+            "endpoint",
+            "end point",
+            "end-point",
+            "profile",
+            "linked_domains",
+            None,
+        ]
+
+        for non_endpoint_type in non_endpoint_types:
+            with self.assertRaises(ValidationError):
+                ENDPOINT_TYPE["validate"](non_endpoint_type)
+
+        ENDPOINT_TYPE["validate"]("Endpoint")
+        ENDPOINT_TYPE["validate"]("Profile")
+        ENDPOINT_TYPE["validate"]("LinkedDomains")

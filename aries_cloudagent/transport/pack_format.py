@@ -7,7 +7,6 @@ from typing import Sequence, Tuple, Union
 from ..config.base import InjectorError
 from ..config.injection_context import InjectionContext
 
-# FIXME: We shouldn't rely on a hardcoded message version here.
 from ..protocols.routing.v1_0.messages.forward import Forward
 
 from ..messaging.util import time_now
@@ -31,7 +30,9 @@ class PackWireFormat(BaseWireFormat):
         self.task_queue: TaskQueue = None
 
     async def parse_message(
-        self, context: InjectionContext, message_body: Union[str, bytes],
+        self,
+        context: InjectionContext,
+        message_body: Union[str, bytes],
     ) -> Tuple[dict, MessageReceipt]:
         """
         Deserialize an incoming message and further populate the request context.
@@ -114,7 +115,11 @@ class PackWireFormat(BaseWireFormat):
 
         try:
             unpacked = await wallet.unpack_message(message_body)
-            (message_json, receipt.sender_verkey, receipt.recipient_verkey,) = unpacked
+            (
+                message_json,
+                receipt.sender_verkey,
+                receipt.recipient_verkey,
+            ) = unpacked
             return message_json
         except WalletError as e:
             raise MessageParseError("Message unpack failed") from e
