@@ -459,28 +459,23 @@ class OutboundTransportManager:
                 queued.error = None
                 queued.state = QueuedOutboundMessage.STATE_DONE
             elif queued.retries:
-                LOGGER.error(
-                    queued.endpoint,
-                    ">>> Posting error: %s; Re-queue failed message ...",
-                )
-            if queued.retries:
                 if LOGGER.isEnabledFor(logging.DEBUG):
-                        (
                     LOGGER.error(
-                            "Error: %s; "
+                        (
                             ">>> Error when posting to: %s; "
+                            "Error: %s; "
                             "Payload: %s; Re-queue failed message ..."
-                        queued.error,
                         ),
                         queued.endpoint,
+                        queued.error,
                         queued.payload,
-                else:
                     )
+                else:
                     LOGGER.error(
-                            ">>> Error when posting to: %s; "
                         (
-                        ),
+                            ">>> Error when posting to: %s; "
                             "Error: %s; Re-queue failed message ..."
+                        ),
                         queued.endpoint,
                         queued.error,
                     )
