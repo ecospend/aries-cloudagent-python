@@ -7,7 +7,6 @@ from ..core.error import BaseError
 
 
 DEFAULT_CRED_DEF_TAG = "default"
-DEFAULT_ISSUANCE_TYPE = "ISSUANCE_BY_DEFAULT"
 DEFAULT_SIGNATURE_TYPE = "CL"
 
 
@@ -39,7 +38,7 @@ class BaseIssuer(ABC, metaclass=ABCMeta):
         """Derive the ID for a schema."""
 
     @abstractmethod
-    async def create_and_store_schema(
+    async def create_schema(
         self,
         origin_did: str,
         schema_name: str,
@@ -121,6 +120,7 @@ class BaseIssuer(ABC, metaclass=ABCMeta):
         credential_offer: dict,
         credential_request: dict,
         credential_values: dict,
+        cred_ex_id: str,
         revoc_reg_id: str = None,
         tails_reader_handle: int = None,
     ) -> Tuple[str, str]:
@@ -132,6 +132,7 @@ class BaseIssuer(ABC, metaclass=ABCMeta):
             credential_offer: Credential Offer to create credential for
             credential_request: Credential request to create credential for
             credential_values: Values to go in credential
+            cred_ex_id: credential exchange identifier to use in issuer cred rev rec
             revoc_reg_id: ID of the revocation registry
             tails_reader_handle: Handle for the tails file blob reader
 
@@ -142,18 +143,18 @@ class BaseIssuer(ABC, metaclass=ABCMeta):
 
     @abstractmethod
     async def revoke_credentials(
-        self, revoc_reg_id: str, tails_file_path: str, cred_revoc_ids: Sequence[str]
-    ) -> str:
+        self, revoc_reg_id: str, tails_file_path: str, cred_rev_ids: Sequence[str]
+    ) -> (str, Sequence[str]):
         """
         Revoke a set of credentials in a revocation registry.
 
         Args:
             revoc_reg_id: ID of the revocation registry
             tails_file_path: path to the local tails file
-            cred_revoc_ids: sequences of credential indexes in the revocation registry
+            cred_rev_ids: sequences of credential indexes in the revocation registry
 
         Returns:
-            the combined revocation delta
+            Tuple with the combined revocation delta, list of cred rev ids not revoked
 
         """
 
@@ -166,7 +167,6 @@ class BaseIssuer(ABC, metaclass=ABCMeta):
         tag: str,
         max_cred_num: int,
         tails_base_path: str,
-        issuance_type: str = None,
     ) -> Tuple[str, str, str]:
         """
         Create a new revocation registry and store it in the wallet.
@@ -178,7 +178,6 @@ class BaseIssuer(ABC, metaclass=ABCMeta):
             tag: the unique revocation registry tag
             max_cred_num: the number of credentials supported in the registry
             tails_base_path: where to store the tails file
-            issuance_type: optionally override the issuance type
 
         Returns:
             A tuple of the revocation registry ID, JSON, and entry JSON

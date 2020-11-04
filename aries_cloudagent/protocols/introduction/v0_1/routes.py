@@ -5,16 +5,18 @@ import logging
 from aiohttp import web
 from aiohttp_apispec import docs, match_info_schema, querystring_schema
 
-from marshmallow import fields, Schema
+from marshmallow import fields
 
+from ....messaging.models.openapi import OpenAPISchema
 from ....messaging.valid import UUIDFour
+from ....storage.error import StorageError
 
-from .base_service import BaseIntroductionService
+from .base_service import BaseIntroductionService, IntroductionError
 
 LOGGER = logging.getLogger(__name__)
 
 
-class IntroStartQueryStringSchema(Schema):
+class IntroStartQueryStringSchema(OpenAPISchema):
     """Query string parameters for request to start introduction."""
 
     target_connection_id = fields.Str(
@@ -27,7 +29,7 @@ class IntroStartQueryStringSchema(Schema):
     )
 
 
-class ConnIdMatchInfoSchema(Schema):
+class ConnIdMatchInfoSchema(OpenAPISchema):
     """Path parameters and validators for request taking connection id."""
 
     conn_id = fields.Str(
@@ -36,7 +38,8 @@ class ConnIdMatchInfoSchema(Schema):
 
 
 @docs(
-    tags=["introduction"], summary="Start an introduction between two connections",
+    tags=["introduction"],
+    summary="Start an introduction between two connections",
 )
 @match_info_schema(ConnIdMatchInfoSchema())
 @querystring_schema(IntroStartQueryStringSchema())
@@ -59,11 +62,15 @@ async def introduction_start(request: web.BaseRequest):
         BaseIntroductionService, required=False
     )
     if not service:
-        raise web.HTTPForbidden()
+        raise web.HTTPForbidden(reason="Introduction service not available")
 
-    await service.start_introduction(
-        init_connection_id, target_connection_id, message, outbound_handler
-    )
+    try:
+        await service.start_introduction(
+            init_connection_id, target_connection_id, message, outbound_handler
+        )
+    except (IntroductionError, StorageError) as err:
+        raise web.HTTPBadRequest(reason=err.roll_up) from err
+
     return web.json_response({})
 
 
@@ -72,4 +79,15 @@ async def register(app: web.Application):
 
     app.add_routes(
         [web.post("/connections/{conn_id}/start-introduction", introduction_start)]
+    )
+
+
+def post_process_routes(app: web.Application):
+    """Amend swagger API."""
+
+    # Add top-level tags description
+    if "tags" not in app._state["swagger_dict"]:
+        app._state["swagger_dict"]["tags"] = []
+    app._state["swagger_dict"]["tags"].append(
+        {"name": "introduction", "description": "Introduction of known parties"}
     )

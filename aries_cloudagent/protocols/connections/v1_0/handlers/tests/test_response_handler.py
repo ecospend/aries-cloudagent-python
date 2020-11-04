@@ -12,7 +12,6 @@ from aries_cloudagent.messaging.base_handler import HandlerException
 from aries_cloudagent.messaging.request_context import RequestContext
 from aries_cloudagent.messaging.responder import MockResponder
 
-# FIXME: We shouldn't rely on a hardcoded message version here.
 from aries_cloudagent.protocols.trustping.v1_0.messages.ping import Ping
 
 from aries_cloudagent.transport.inbound.receipt import MessageReceipt
@@ -45,13 +44,23 @@ def did_doc():
     ident = "1"
     pk_value = TEST_VERKEY
     pk = PublicKey(
-        TEST_DID, ident, pk_value, PublicKeyType.ED25519_SIG_2018, controller, False,
+        TEST_DID,
+        ident,
+        pk_value,
+        PublicKeyType.ED25519_SIG_2018,
+        controller,
+        False,
     )
     doc.set(pk)
     recip_keys = [pk]
     router_keys = []
     service = Service(
-        TEST_DID, "indy", "IndyAgent", recip_keys, router_keys, TEST_ENDPOINT,
+        TEST_DID,
+        "indy",
+        "IndyAgent",
+        recip_keys,
+        router_keys,
+        TEST_ENDPOINT,
     )
     doc.set(service)
     yield doc

@@ -3,29 +3,32 @@
 from aiohttp import web
 from aiohttp_apispec import docs, match_info_schema, request_schema, response_schema
 
-from marshmallow import fields, Schema
+from marshmallow import fields
 
-from aries_cloudagent.connections.models.connection_record import ConnectionRecord
-from aries_cloudagent.messaging.valid import UUIDFour
-from aries_cloudagent.storage.error import StorageNotFoundError
+from ....connections.models.connection_record import ConnectionRecord
+from ....messaging.models.openapi import OpenAPISchema
+from ....messaging.valid import UUIDFour
+from ....storage.error import StorageNotFoundError
 
-
+from .message_types import SPEC_URI
 from .messages.ping import Ping
 
 
-class PingRequestSchema(Schema):
+class PingRequestSchema(OpenAPISchema):
     """Request schema for performing a ping."""
 
-    comment = fields.Str(required=False, description="Comment for the ping message")
+    comment = fields.Str(
+        description="Comment for the ping message", required=False, allow_none=True
+    )
 
 
-class PingRequestResponseSchema(Schema):
+class PingRequestResponseSchema(OpenAPISchema):
     """Request schema for performing a ping."""
 
     thread_id = fields.Str(required=False, description="Thread ID of the ping message")
 
 
-class ConnIdMatchInfoSchema(Schema):
+class ConnIdMatchInfoSchema(OpenAPISchema):
     """Path parameters and validators for request taking connection id."""
 
     conn_id = fields.Str(
@@ -53,11 +56,11 @@ async def connections_send_ping(request: web.BaseRequest):
 
     try:
         connection = await ConnectionRecord.retrieve_by_id(context, connection_id)
-    except StorageNotFoundError:
-        raise web.HTTPNotFound()
+    except StorageNotFoundError as err:
+        raise web.HTTPNotFound(reason=err.roll_up) from err
 
     if not connection.is_ready:
-        raise web.HTTPBadRequest()
+        raise web.HTTPBadRequest(reason=f"Connection {connection_id} not ready")
 
     msg = Ping(comment=comment)
     await outbound_handler(msg, connection_id=connection_id)
@@ -70,4 +73,19 @@ async def register(app: web.Application):
 
     app.add_routes(
         [web.post("/connections/{conn_id}/send-ping", connections_send_ping)]
+    )
+
+
+def post_process_routes(app: web.Application):
+    """Amend swagger API."""
+
+    # Add top-level tags description
+    if "tags" not in app._state["swagger_dict"]:
+        app._state["swagger_dict"]["tags"] = []
+    app._state["swagger_dict"]["tags"].append(
+        {
+            "name": "trustping",
+            "description": "Trust-ping over connection",
+            "externalDocs": {"description": "Specification", "url": SPEC_URI},
+        }
     )

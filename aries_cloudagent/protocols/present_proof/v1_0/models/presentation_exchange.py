@@ -1,11 +1,14 @@
 """Aries#0037 v1.0 presentation exchange information with non-secrets storage."""
 
+from os import environ
 from typing import Any
 
 from marshmallow import fields, validate
 
 from .....messaging.models.base_record import BaseExchangeRecord, BaseExchangeSchema
 from .....messaging.valid import UUIDFour
+
+unencrypted_tags = environ.get("EXCH_UNENCRYPTED_TAGS", "False").upper() == "TRUE"
 
 
 class V10PresentationExchange(BaseExchangeRecord):
@@ -19,7 +22,7 @@ class V10PresentationExchange(BaseExchangeRecord):
     RECORD_TYPE = "presentation_exchange_v10"
     RECORD_ID_NAME = "presentation_exchange_id"
     WEBHOOK_TOPIC = "present_proof"
-    TAG_NAMES = {"thread_id"}
+    TAG_NAMES = {"~thread_id"} if unencrypted_tags else {"thread_id"}
 
     INITIATOR_SELF = "self"
     INITIATOR_EXTERNAL = "external"
@@ -47,6 +50,7 @@ class V10PresentationExchange(BaseExchangeRecord):
         state: str = None,
         presentation_proposal_dict: dict = None,  # serialized pres proposal message
         presentation_request: dict = None,  # indy proof req
+        presentation_request_dict: dict = None,  # serialized pres request message
         presentation: dict = None,  # indy proof
         verified: str = None,
         auto_present: bool = False,
@@ -63,6 +67,7 @@ class V10PresentationExchange(BaseExchangeRecord):
         self.state = state
         self.presentation_proposal_dict = presentation_proposal_dict
         self.presentation_request = presentation_request  # indy proof req
+        self.presentation_request_dict = presentation_request_dict
         self.presentation = presentation  # indy proof
         self.verified = verified
         self.auto_present = auto_present
@@ -84,6 +89,7 @@ class V10PresentationExchange(BaseExchangeRecord):
                 "initiator",
                 "presentation_proposal_dict",
                 "presentation_request",
+                "presentation_request_dict",
                 "presentation",
                 "role",
                 "state",
@@ -145,6 +151,9 @@ class V10PresentationExchangeSchema(BaseExchangeSchema):
     presentation_request = fields.Dict(
         required=False,
         description="(Indy) presentation request (also known as proof request)",
+    )
+    presentation_request_dict = fields.Dict(
+        required=False, description="Serialized presentation request message"
     )
     presentation = fields.Dict(
         required=False, description="(Indy) presentation (also known as proof)"

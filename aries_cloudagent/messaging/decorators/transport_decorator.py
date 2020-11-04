@@ -4,7 +4,7 @@ The transport decorator (~transport).
 This decorator allows changes to agent response behaviour and queue status updates.
 """
 
-from marshmallow import fields, validate
+from marshmallow import EXCLUDE, fields, validate
 
 from ..models.base import BaseModel, BaseModelSchema
 from ..valid import UUIDFour, WHOLE_NUM
@@ -46,6 +46,7 @@ class TransportDecoratorSchema(BaseModelSchema):
         """TransportDecoratorSchema metadata."""
 
         model_class = TransportDecorator
+        unknown = EXCLUDE
 
     return_route = fields.Str(
         required=False,
@@ -59,5 +60,8 @@ class TransportDecoratorSchema(BaseModelSchema):
         example=UUIDFour.EXAMPLE,
     )
     queued_message_count = fields.Int(
-        required=False, description="Number of queued messages", **WHOLE_NUM
+        required=False,
+        description="Number of queued messages",
+        strict=True,
+        **WHOLE_NUM,
     )

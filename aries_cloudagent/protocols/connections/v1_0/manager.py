@@ -4,31 +4,29 @@ import logging
 
 from typing import Sequence, Tuple
 
-from aries_cloudagent.cache.base import BaseCache
-from aries_cloudagent.connections.models.connection_record import ConnectionRecord
-from aries_cloudagent.connections.models.connection_target import ConnectionTarget
-from aries_cloudagent.connections.models.diddoc import (
+from ....cache.base import BaseCache
+from ....connections.models.connection_record import ConnectionRecord
+from ....connections.models.connection_target import ConnectionTarget
+from ....connections.models.diddoc import (
     DIDDoc,
     PublicKey,
     PublicKeyType,
     Service,
 )
-from aries_cloudagent.config.base import InjectorError
-from aries_cloudagent.config.injection_context import InjectionContext
-from aries_cloudagent.core.error import BaseError
-from aries_cloudagent.ledger.base import BaseLedger
-from aries_cloudagent.messaging.responder import BaseResponder
-from aries_cloudagent.storage.base import BaseStorage
-from aries_cloudagent.storage.error import StorageError, StorageNotFoundError
-from aries_cloudagent.storage.record import StorageRecord
-from aries_cloudagent.transport.inbound.receipt import MessageReceipt
-from aries_cloudagent.wallet.base import BaseWallet, DIDInfo
-from aries_cloudagent.wallet.crypto import create_keypair, seed_to_did
-from aries_cloudagent.wallet.error import WalletNotFoundError
-from aries_cloudagent.wallet.util import bytes_to_b58
-
-# FIXME: We shouldn't rely on a hardcoded message version here.
-from aries_cloudagent.protocols.routing.v1_0.manager import RoutingManager
+from ....config.base import InjectorError
+from ....config.injection_context import InjectionContext
+from ....core.error import BaseError
+from ....ledger.base import BaseLedger
+from ....messaging.responder import BaseResponder
+from ....storage.base import BaseStorage
+from ....storage.error import StorageError, StorageNotFoundError
+from ....storage.record import StorageRecord
+from ....transport.inbound.receipt import MessageReceipt
+from ....wallet.base import BaseWallet, DIDInfo
+from ....wallet.crypto import create_keypair, seed_to_did
+from ....wallet.error import WalletNotFoundError
+from ....wallet.util import bytes_to_b58
+from ....protocols.routing.v1_0.manager import RoutingManager
 
 from .messages.connection_invitation import ConnectionInvitation
 from .messages.connection_request import ConnectionRequest
@@ -90,8 +88,7 @@ class ConnectionManager:
         ::
 
             {
-                "@type":
-                    "did:sov:BzCbsNYhMrjHiqZDTUASHg;spec/connections/1.0/invitation",
+                "@type": "https://didcomm.org/connections/1.0/invitation",
                 "label": "Alice",
                 "did": "did:sov:QmWbsNYhMrjHiqZDTUTEJs"
             }
@@ -101,8 +98,7 @@ class ConnectionManager:
         ::
 
             {
-                "@type":
-                    "did:sov:BzCbsNYhMrjHiqZDTUASHg;spec/connections/1.0/invitation",
+                "@type": "https://didcomm.org/connections/1.0/invitation",
                 "label": "Alice",
                 "did": "did:peer:oiSqsNYhMrjHiqZDTUthsw",
                 "recipientKeys": ["8HH5gYEeNc3z7PYXmd54d4x6qAfCNrqQqEB3nS7Zfu7K"],
@@ -295,14 +291,14 @@ class ConnectionManager:
             connection.my_did = my_info.did
 
         # Create connection request message
-        if not my_endpoint:
+        if my_endpoint:
+            my_endpoints = [my_endpoint]
+        else:
             my_endpoints = []
             default_endpoint = self.context.settings.get("default_endpoint")
             if default_endpoint:
                 my_endpoints.append(default_endpoint)
             my_endpoints.extend(self.context.settings.get("additional_endpoints", []))
-        else:
-            my_endpoints = [my_endpoint]
         did_doc = await self.create_did_document(
             my_info, connection.inbound_connection_id, my_endpoints
         )
@@ -480,7 +476,9 @@ class ConnectionManager:
             connection.my_did = my_info.did
 
         # Create connection response message
-        if not my_endpoint:
+        if my_endpoint:
+            my_endpoints = [my_endpoint]
+        else:
             my_endpoints = []
             default_endpoint = self.context.settings.get("default_endpoint")
             if default_endpoint:

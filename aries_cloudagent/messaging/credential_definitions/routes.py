@@ -1,6 +1,6 @@
 """Credential definition admin routes."""
 
-from asyncio import shield
+from asyncio import ensure_future, shield
 
 from aiohttp import web
 from aiohttp_apispec import (
@@ -11,23 +11,36 @@ from aiohttp_apispec import (
     response_schema,
 )
 
-from marshmallow import fields, Schema
+from marshmallow import fields
 
 from ...issuer.base import BaseIssuer
 from ...ledger.base import BaseLedger
 from ...storage.base import BaseStorage
+from ...tails.base import BaseTailsServer
 
-from ..valid import INDY_CRED_DEF_ID, INDY_SCHEMA_ID, INDY_VERSION
+from ..models.openapi import OpenAPISchema
+from ..valid import INDY_CRED_DEF_ID, INDY_REV_REG_SIZE, INDY_SCHEMA_ID, INDY_VERSION
+
+from ...revocation.error import RevocationError, RevocationNotSupportedError
+from ...revocation.indy import IndyRevocation
+
+from ...ledger.error import LedgerError
 
 from .util import CredDefQueryStringSchema, CRED_DEF_TAGS, CRED_DEF_SENT_RECORD_TYPE
 
 
-class CredentialDefinitionSendRequestSchema(Schema):
+class CredentialDefinitionSendRequestSchema(OpenAPISchema):
     """Request schema for schema send request."""
 
     schema_id = fields.Str(description="Schema identifier", **INDY_SCHEMA_ID)
     support_revocation = fields.Boolean(
         required=False, description="Revocation supported flag"
+    )
+    revocation_registry_size = fields.Int(
+        description="Revocation registry size",
+        required=False,
+        strict=True,
+        **INDY_REV_REG_SIZE,
     )
     tag = fields.Str(
         required=False,
@@ -37,7 +50,7 @@ class CredentialDefinitionSendRequestSchema(Schema):
     )
 
 
-class CredentialDefinitionSendResultsSchema(Schema):
+class CredentialDefinitionSendResultsSchema(OpenAPISchema):
     """Results schema for schema send request."""
 
     credential_definition_id = fields.Str(
@@ -45,14 +58,14 @@ class CredentialDefinitionSendResultsSchema(Schema):
     )
 
 
-class CredentialDefinitionSchema(Schema):
+class CredentialDefinitionSchema(OpenAPISchema):
     """Credential definition schema."""
 
     ver = fields.Str(description="Node protocol version", **INDY_VERSION)
     ident = fields.Str(
         description="Credential definition identifier",
         data_key="id",
-        **INDY_CRED_DEF_ID
+        **INDY_CRED_DEF_ID,
     )
     schemaId = fields.Str(
         description="Schema identifier within credential definition identifier",
@@ -73,13 +86,13 @@ class CredentialDefinitionSchema(Schema):
     )
 
 
-class CredentialDefinitionGetResultsSchema(Schema):
+class CredentialDefinitionGetResultsSchema(OpenAPISchema):
     """Results schema for schema get request."""
 
     credential_definition = fields.Nested(CredentialDefinitionSchema)
 
 
-class CredentialDefinitionsCreatedResultsSchema(Schema):
+class CredentialDefinitionsCreatedResultsSchema(OpenAPISchema):
     """Results schema for cred-defs-created request."""
 
     credential_definition_ids = fields.List(
@@ -87,13 +100,13 @@ class CredentialDefinitionsCreatedResultsSchema(Schema):
     )
 
 
-class CredDefIdMatchInfoSchema(Schema):
+class CredDefIdMatchInfoSchema(OpenAPISchema):
     """Path parameters and validators for request taking cred def id."""
 
     cred_def_id = fields.Str(
         description="Credential definition identifier",
         required=True,
-        **INDY_CRED_DEF_ID
+        **INDY_CRED_DEF_ID,
     )
 
 
@@ -121,21 +134,83 @@ async def credential_definitions_send_credential_definition(request: web.BaseReq
     schema_id = body.get("schema_id")
     support_revocation = bool(body.get("support_revocation"))
     tag = body.get("tag")
+    rev_reg_size = body.get("revocation_registry_size")
 
-    ledger: BaseLedger = await context.inject(BaseLedger)
+    ledger: BaseLedger = await context.inject(BaseLedger, required=False)
+    if not ledger:
+        reason = "No ledger available"
+        if not context.settings.get_value("wallet.type"):
+            reason += ": missing wallet-type?"
+        raise web.HTTPForbidden(reason=reason)
+
     issuer: BaseIssuer = await context.inject(BaseIssuer)
-    async with ledger:
-        credential_definition_id, credential_definition = await shield(
-            ledger.create_and_send_credential_definition(
-                issuer,
-                schema_id,
-                signature_type=None,
-                tag=tag,
-                support_revocation=support_revocation,
+    try:  # even if in wallet, send it and raise if erroneously so
+        async with ledger:
+            (cred_def_id, cred_def, novel) = await shield(
+                ledger.create_and_send_credential_definition(
+                    issuer,
+                    schema_id,
+                    signature_type=None,
+                    tag=tag,
+                    support_revocation=support_revocation,
+                )
             )
-        )
+    except LedgerError as e:
+        raise web.HTTPBadRequest(reason=e.message) from e
 
-    return web.json_response({"credential_definition_id": credential_definition_id})
+    # If revocation is requested and cred def is novel, create revocation registry
+    if support_revocation and novel:
+        tails_base_url = context.settings.get("tails_server_base_url")
+        if not tails_base_url:
+            raise web.HTTPBadRequest(reason="tails_server_base_url not configured")
+        try:
+            # Create registry
+            revoc = IndyRevocation(context)
+            registry_record = await revoc.init_issuer_registry(
+                cred_def_id,
+                max_cred_num=rev_reg_size,
+            )
+
+        except RevocationNotSupportedError as e:
+            raise web.HTTPBadRequest(reason=e.message) from e
+        await shield(registry_record.generate_registry(context))
+        try:
+            await registry_record.set_tails_file_public_uri(
+                context, f"{tails_base_url}/{registry_record.revoc_reg_id}"
+            )
+            await registry_record.send_def(context)
+            await registry_record.send_entry(context)
+
+            # stage pending registry independent of whether tails server is OK
+            pending_registry_record = await revoc.init_issuer_registry(
+                registry_record.cred_def_id,
+                max_cred_num=registry_record.max_cred_num,
+            )
+            ensure_future(
+                pending_registry_record.stage_pending_registry(context, max_attempts=16)
+            )
+
+            tails_server: BaseTailsServer = await context.inject(BaseTailsServer)
+            (upload_success, reason) = await tails_server.upload_tails_file(
+                context,
+                registry_record.revoc_reg_id,
+                registry_record.tails_local_path,
+                interval=0.8,
+                backoff=-0.5,
+                max_attempts=5,  # heuristic: respect HTTP timeout
+            )
+            if not upload_success:
+                raise web.HTTPInternalServerError(
+                    reason=(
+                        f"Tails file for rev reg {registry_record.revoc_reg_id} "
+                        f"failed to upload: {reason}"
+                    )
+                )
+
+        except RevocationError as e:
+            raise web.HTTPBadRequest(reason=e.message) from e
+
+    return web.json_response({"credential_definition_id": cred_def_id})
 
 
 @docs(
@@ -189,15 +264,19 @@ async def credential_definitions_get_credential_definition(request: web.BaseRequ
     """
     context = request.app["request_context"]
 
-    credential_definition_id = request.match_info["cred_def_id"]
+    cred_def_id = request.match_info["cred_def_id"]
 
-    ledger: BaseLedger = await context.inject(BaseLedger)
+    ledger: BaseLedger = await context.inject(BaseLedger, required=False)
+    if not ledger:
+        reason = "No ledger available"
+        if not context.settings.get_value("wallet.type"):
+            reason += ": missing wallet-type?"
+        raise web.HTTPForbidden(reason=reason)
+
     async with ledger:
-        credential_definition = await ledger.get_credential_definition(
-            credential_definition_id
-        )
+        cred_def = await ledger.get_credential_definition(cred_def_id)
 
-    return web.json_response({"credential_definition": credential_definition})
+    return web.json_response({"credential_definition": cred_def})
 
 
 async def register(app: web.Application):
@@ -219,4 +298,25 @@ async def register(app: web.Application):
                 allow_head=False,
             ),
         ]
+    )
+
+
+def post_process_routes(app: web.Application):
+    """Amend swagger API."""
+
+    # Add top-level tags description
+    if "tags" not in app._state["swagger_dict"]:
+        app._state["swagger_dict"]["tags"] = []
+    app._state["swagger_dict"]["tags"].append(
+        {
+            "name": "credential-definition",
+            "description": "Credential definition operations",
+            "externalDocs": {
+                "description": "Specification",
+                "url": (
+                    "https://github.com/hyperledger/indy-node/blob/master/"
+                    "design/anoncreds.md#cred_def"
+                ),
+            },
+        }
     )

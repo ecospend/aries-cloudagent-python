@@ -1,5 +1,6 @@
 """Aries#0036 v1.0 credential exchange information with non-secrets storage."""
 
+from os import environ
 from typing import Any
 
 from marshmallow import fields, validate
@@ -7,6 +8,8 @@ from marshmallow import fields, validate
 from .....config.injection_context import InjectionContext
 from .....messaging.models.base_record import BaseExchangeRecord, BaseExchangeSchema
 from .....messaging.valid import INDY_CRED_DEF_ID, INDY_SCHEMA_ID, UUIDFour
+
+unencrypted_tags = environ.get("EXCH_UNENCRYPTED_TAGS", "False").upper() == "TRUE"
 
 
 class V10CredentialExchange(BaseExchangeRecord):
@@ -20,7 +23,7 @@ class V10CredentialExchange(BaseExchangeRecord):
     RECORD_TYPE = "credential_exchange_v10"
     RECORD_ID_NAME = "credential_exchange_id"
     WEBHOOK_TOPIC = "issue_credential"
-    TAG_NAMES = {"thread_id"}
+    TAG_NAMES = {"~thread_id"} if unencrypted_tags else {"thread_id"}
 
     INITIATOR_SELF = "self"
     INITIATOR_EXTERNAL = "external"
@@ -50,6 +53,7 @@ class V10CredentialExchange(BaseExchangeRecord):
         credential_definition_id: str = None,
         schema_id: str = None,
         credential_proposal_dict: dict = None,  # serialized credential proposal message
+        credential_offer_dict: dict = None,  # serialized credential offer message
         credential_offer: dict = None,  # indy credential offer
         credential_request: dict = None,  # indy credential request
         credential_request_metadata: dict = None,
@@ -77,6 +81,7 @@ class V10CredentialExchange(BaseExchangeRecord):
         self.credential_definition_id = credential_definition_id
         self.schema_id = schema_id
         self.credential_proposal_dict = credential_proposal_dict
+        self.credential_offer_dict = credential_offer_dict
         self.credential_offer = credential_offer
         self.credential_request = credential_request
         self.credential_request_metadata = credential_request_metadata
@@ -104,6 +109,7 @@ class V10CredentialExchange(BaseExchangeRecord):
             for prop in (
                 "connection_id",
                 "credential_proposal_dict",
+                "credential_offer_dict",
                 "credential_offer",
                 "credential_request",
                 "credential_request_metadata",
@@ -137,7 +143,9 @@ class V10CredentialExchange(BaseExchangeRecord):
             record = await cls.retrieve_by_id(context, record_id)
         else:
             record = await cls.retrieve_by_tag_filter(
-                context, {"thread_id": thread_id}, {"connection_id": connection_id}
+                context,
+                {"thread_id": thread_id},
+                {"connection_id": connection_id} if connection_id else None,
             )
             await cls.set_cached_key(context, cache_key, record.credential_exchange_id)
         return record
@@ -196,6 +204,9 @@ class V10CredentialExchangeSchema(BaseExchangeSchema):
     )
     credential_proposal_dict = fields.Dict(
         required=False, description="Serialized credential proposal message"
+    )
+    credential_offer_dict = fields.Dict(
+        required=False, description="Serialized credential offer message"
     )
     credential_offer = fields.Dict(
         required=False, description="(Indy) credential offer"
