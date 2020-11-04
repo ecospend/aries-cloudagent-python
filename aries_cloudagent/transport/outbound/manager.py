@@ -65,6 +65,8 @@ class QueuedOutboundMessage:
 class OutboundTransportManager:
     """Outbound transport manager class."""
 
+    MAX_RETRY_COUNT = 4
+
     def __init__(
         self, context: InjectionContext, handle_not_delivered: Callable = None
     ):
@@ -87,6 +89,8 @@ class OutboundTransportManager:
         self.running_transports = {}
         self.task_queue = TaskQueue(max_active=200)
         self._process_task: asyncio.Task = None
+        if self.context.settings.get("transport.max_outbound_retry"):
+            self.MAX_RETRY_COUNT = self.context.settings["transport.max_outbound_retry"]
 
     async def setup(self):
         """Perform setup operations."""
@@ -251,7 +255,7 @@ class OutboundTransportManager:
             raise OutboundDeliveryError("No supported transport for outbound message")
 
         queued = QueuedOutboundMessage(context, outbound, target, transport_id)
-        queued.retries = 4
+        queued.retries = self.MAX_RETRY_COUNT
         self.outbound_new.append(queued)
         self.process_queued()
 
@@ -313,6 +317,7 @@ class OutboundTransportManager:
             self.outbound_event.clear()
             loop_time = get_timer()
             upd_buffer = []
+            retry_count = 0
 
             for queued in self.outbound_buffer:
                 if queued.state == QueuedOutboundMessage.STATE_DONE:
@@ -334,6 +339,8 @@ class OutboundTransportManager:
                     if queued.retry_at < loop_time:
                         queued.retry_at = None
                         deliver = True
+                    else:
+                        retry_count += 1
 
                 if deliver:
                     queued.state = QueuedOutboundMessage.STATE_DELIVER
@@ -385,8 +392,11 @@ class OutboundTransportManager:
 
             self.outbound_buffer = upd_buffer
             if self.outbound_buffer:
-                if not new_pending:
+                if (not new_pending) and (not retry_count):
                     await self.outbound_event.wait()
+                elif retry_count:
+                    # only retries - yield here so we don't hog resources
+                    await asyncio.sleep(0.05)
             else:
                 break
 
@@ -442,23 +452,40 @@ class OutboundTransportManager:
                     pickup_manager.store_pickup_message(
                         message=json.loads(queued.payload),
                         verkey=queued.target.recipient_keys[0],
-                        target_did=queued.target.did,
                         endpoint=queued.target.endpoint
+                        target_did=queued.target.did,
                     )
                 )
-                queued.error = None
                 queued.state = QueuedOutboundMessage.STATE_DONE
+                queued.error = None
             elif queued.retries:
-                LOGGER.error(
-                    ">>> Posting error: %s; Re-queue failed message ...",
-                    queued.endpoint,
-                )
+                if LOGGER.isEnabledFor(logging.DEBUG):
+                    LOGGER.error(
+                            ">>> Error when posting to: %s; "
+                        (
+                            "Error: %s; "
+                            "Payload: %s; Re-queue failed message ..."
+                        queued.endpoint,
+                        ),
+                        queued.error,
+                    )
+                        queued.payload,
+                else:
+                    LOGGER.error(
+                        (
+                            ">>> Error when posting to: %s; "
+                        ),
+                            "Error: %s; Re-queue failed message ..."
+                        queued.endpoint,
+                        queued.error,
+                    )
                 queued.retries -= 1
                 queued.state = QueuedOutboundMessage.STATE_RETRY
                 queued.retry_at = time.perf_counter() + 10
             else:
                 LOGGER.exception(
-                    "Outbound message could not be delivered", exc_info=queued.error,
+                    ">>> Outbound message failed to deliver, NOT Re-queued.",
+                    exc_info=queued.error,
                 )
                 LOGGER.error(">>> NOT Re-queued, state is DONE, failed to deliver msg.")
                 pickup_manager = PickupManager(self.context)

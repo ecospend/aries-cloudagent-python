@@ -195,7 +195,10 @@ class TestAttachDecorator(TestCase):
                 "signature": SIGNATURE,
                 "signatures": [one_jws.serialize(), one_jws.serialize()],
             },
-            {"protected": PROTECTED, "signature": SIGNATURE,},
+            {
+                "protected": PROTECTED,
+                "signature": SIGNATURE,
+            },
         ]
         for bad in badness:
             with pytest.raises(BaseModelError) as excinfo:
@@ -305,7 +308,9 @@ class TestAttachDecorator(TestCase):
 
     def test_indy_dict(self):
         deco_indy = AttachDecorator.from_indy_dict(
-            indy_dict=INDY_CRED, ident=IDENT, description=DESCRIPTION,
+            indy_dict=INDY_CRED,
+            ident=IDENT,
+            description=DESCRIPTION,
         )
         assert deco_indy.mime_type == "application/json"
         assert hasattr(deco_indy.data, "base64_")
@@ -330,6 +335,26 @@ class TestAttachDecorator(TestCase):
 
         assert lynx_str == lynx_list
         assert lynx_str != links
+        assert links != DATA_LINKS  # has sha256
+
+    def test_from_aries_msg(self):
+        deco_aries = AttachDecorator.from_aries_msg(
+            message=INDY_CRED,
+            ident=IDENT,
+            description=DESCRIPTION,
+        )
+        assert deco_aries.mime_type == "application/json"
+        assert hasattr(deco_aries.data, "json_")
+        assert deco_aries.data.base64 is None
+        assert deco_aries.data.json is not None
+        assert deco_aries.data.links is None
+        assert deco_aries.data.sha256 is None
+        assert deco_aries.data.json == INDY_CRED
+        assert deco_aries.ident == IDENT
+        assert deco_aries.description == DESCRIPTION
+
+        deco_aries_auto_id = AttachDecorator.from_aries_msg(message=INDY_CRED)
+        assert deco_aries_auto_id.ident
 
 
 @pytest.mark.indy

@@ -32,7 +32,7 @@ class BasicWallet(BaseWallet):
         """
         if not config:
             config = {}
-        super(BasicWallet, self).__init__(config)
+        super().__init__(config)
         self._name = config.get("name")
         self._keys = {}
         self._local_dids = {}
@@ -137,6 +137,58 @@ class BasicWallet(BaseWallet):
             raise WalletNotFoundError("Key not found: {}".format(verkey))
         self._keys[verkey]["metadata"] = metadata.copy() if metadata else {}
 
+    async def rotate_did_keypair_start(self, did: str, next_seed: str = None) -> str:
+        """
+        Begin key rotation for DID that wallet owns: generate new keypair.
+
+        Args:
+            did: signing DID
+            next_seed: incoming replacement seed (default random)
+
+        Returns:
+            The new verification key
+
+        Raises:
+            WalletNotFoundError: if wallet does not own DID
+
+        """
+        if did not in self._local_dids:
+            raise WalletNotFoundError("Wallet owns no such DID: {}".format(did))
+
+        key_info = await self.create_signing_key(next_seed, {"did": did})
+        return key_info.verkey
+
+    async def rotate_did_keypair_apply(self, did: str) -> None:
+        """
+        Apply temporary keypair as main for DID that wallet owns.
+
+        Args:
+            did: signing DID
+
+        Raises:
+            WalletNotFoundError: if wallet does not own DID
+            WalletError: if wallet has not started key rotation
+
+        """
+        if did not in self._local_dids:
+            raise WalletNotFoundError("Wallet owns no such DID: {}".format(did))
+        temp_keys = [
+            k for k in self._keys if self._keys[k]["metadata"].get("did") == did
+        ]
+        if not temp_keys:
+            raise WalletError("Key rotation not in progress for DID: {}".format(did))
+        verkey_enc = temp_keys[0]
+
+        self._local_dids[did].update(
+            {
+                "seed": self._keys[verkey_enc]["seed"],
+                "secret": self._keys[verkey_enc]["secret"],
+                "verkey": verkey_enc,
+            }
+        )
+        self._keys.pop(verkey_enc)
+        return DIDInfo(did, verkey_enc, self._local_dids[did]["metadata"].copy())
+
     async def create_local_did(
         self, seed: str = None, did: str = None, metadata: dict = None
     ) -> DIDInfo:
@@ -144,7 +196,7 @@ class BasicWallet(BaseWallet):
         Create and store a new local DID.
 
         Args:
-            seed: Optional seed to use for did
+            seed: Optional seed to use for DID
             did: The DID to use
             metadata: Metadata to store with DID
 
@@ -200,7 +252,7 @@ class BasicWallet(BaseWallet):
         Find info for a local DID.
 
         Args:
-            did: The DID to get info for
+            did: The DID for which to get info
 
         Returns:
             A `DIDInfo` instance representing the found DID
@@ -218,7 +270,7 @@ class BasicWallet(BaseWallet):
         Resolve a local DID from a verkey.
 
         Args:
-            verkey: The verkey to get the local DID for
+            verkey: The verkey for which to get the local DID
 
         Returns:
             A `DIDInfo` instance representing the found DID
@@ -237,7 +289,7 @@ class BasicWallet(BaseWallet):
         Replace metadata for a local DID.
 
         Args:
-            did: The DID to replace metadata for
+            did: The DID for which to replace metadata
             metadata: The new metadata
 
         Raises:
@@ -254,11 +306,9 @@ class BasicWallet(BaseWallet):
 
         Args:
             verkey: The verkey to lookup
-            long:
 
         Returns:
             The private key
-
 
         Raises:
             WalletError: If the private key is not found
@@ -334,8 +384,8 @@ class BasicWallet(BaseWallet):
 
         Args:
             message: The message to pack
-            to_verkeys: List of verkeys to pack for
-            from_verkey: Sender verkey to pack from
+            to_verkeys: List of verkeys for which to pack
+            from_verkey: Sender verkey from which to pack
 
         Returns:
             The resulting packed message bytes

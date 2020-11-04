@@ -2,9 +2,9 @@
 
 from typing import Mapping, Sequence
 
-from marshmallow import fields, validate
+from marshmallow import EXCLUDE, fields, validate
 
-from aries_cloudagent.messaging.agent_message import AgentMessage, AgentMessageSchema
+from ....messaging.agent_message import AgentMessage, AgentMessageSchema
 
 from .message_types import PROBLEM_REPORT, PROTOCOL_PACKAGE
 
@@ -55,7 +55,7 @@ class ProblemReport(AgentMessage):
             tracking_uri: URI for tracking the problem
             escalation_uri: URI for escalating the problem
         """
-        super(ProblemReport, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.msg_catalog = msg_catalog
         self.locale = locale
         self.explain_ltxt = explain_ltxt
@@ -77,12 +77,13 @@ class ProblemReportSchema(AgentMessageSchema):
         """Problem report schema metadata."""
 
         model_class = ProblemReport
+        unknown = EXCLUDE
 
     msg_catalog = fields.Str(
         data_key="@msg_catalog",
         required=False,
         description="Reference to a message catalog",
-        example="did:sov:BzCbsNYhMrjHiqZDTUASHg;spec/error-codes",
+        example="https://didcomm.org/error-codes",
     )
     locale = fields.Str(
         data_key="@locale", required=False, description="Locale", example="en-US"

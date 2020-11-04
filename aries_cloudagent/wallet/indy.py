@@ -2,15 +2,20 @@
 
 import json
 import logging
+
 from typing import Sequence
 
 import indy.anoncreds
 import indy.did
 import indy.crypto
 import indy.wallet
+
 from indy.error import IndyError, ErrorCode
 
 from ..indy.error import IndyErrorHandler
+from ..ledger.base import BaseLedger
+from ..ledger.endpoint_type import EndpointType
+from ..ledger.error import LedgerConfigError
 
 from .base import BaseWallet, KeyInfo, DIDInfo
 from .crypto import validate_seed
@@ -46,7 +51,7 @@ class IndyWallet(BaseWallet):
 
         if not config:
             config = {}
-        super(IndyWallet, self).__init__(config)
+        super().__init__(config)
         self._auto_create = config.get("auto_create", True)
         self._auto_remove = config.get("auto_remove", False)
         self._created = False
@@ -56,6 +61,8 @@ class IndyWallet(BaseWallet):
         self._key_derivation_method = (
             config.get("key_derivation_method") or self.DEFAULT_KEY_DERIVIATION
         )
+        self._rekey = config.get("rekey")
+        self._rekey_derivation_method = config.get("key_derivation_method")
         self._name = config.get("name") or self.DEFAULT_NAME
         self._storage_type = config.get("storage_type") or self.DEFAULT_STORAGE_TYPE
         self._storage_config = config.get("storage_config", None)
@@ -150,10 +157,17 @@ class IndyWallet(BaseWallet):
         ret = {
             "key": self._key,
             "key_derivation_method": self._key_derivation_method,
+            # rekey
+            # rekey_derivation_method
             # storage_credentials
         }
+        if self._rekey:
+            ret["rekey"] = self._rekey
+        if self._rekey_derivation_method:
+            ret["rekey_derivation_method"] = self._rekey_derivation_method
         if self._storage_creds is not None:
             ret["storage_credentials"] = json.loads(self._storage_creds)
+
         return ret
 
     async def create(self, replace: bool = False):
@@ -231,6 +245,12 @@ class IndyWallet(BaseWallet):
                     config=json.dumps(self._wallet_config),
                     credentials=json.dumps(self._wallet_access),
                 )
+                if self._rekey:
+                    self._key = self._rekey
+                    self._rekey = None
+                if self._rekey_derivation_method:
+                    self._key_derivation_method = self._rekey_derivation_method
+                    self._rekey_derivation_method = None
                 break
             except IndyError as x_indy:
                 if x_indy.error_code == ErrorCode.WalletNotFoundError:
@@ -355,6 +375,57 @@ class IndyWallet(BaseWallet):
         await self.get_signing_key(verkey)  # throw exception if key is undefined
         await indy.crypto.set_key_metadata(self.handle, verkey, meta_json)
 
+    async def rotate_did_keypair_start(self, did: str, next_seed: str = None) -> str:
+        """
+        Begin key rotation for DID that wallet owns: generate new keypair.
+
+        Args:
+            did: signing DID
+            next_seed: incoming replacement seed (default random)
+
+        Returns:
+            The new verification key
+
+        """
+        try:
+            verkey = await indy.did.replace_keys_start(
+                self.handle,
+                did,
+                json.dumps(
+                    {"seed": bytes_to_b64(validate_seed(next_seed))}
+                    if next_seed
+                    else {}
+                ),
+            )
+        except IndyError as x_indy:
+            if x_indy.error_code == ErrorCode.WalletItemNotFound:
+                raise WalletNotFoundError("Wallet owns no such DID: {}".format(did))
+            raise IndyErrorHandler.wrap_error(
+                x_indy, "Wallet {} error".format(self.name), WalletError
+            ) from x_indy
+
+        return verkey
+
+    async def rotate_did_keypair_apply(self, did: str) -> DIDInfo:
+        """
+        Apply temporary keypair as main for DID that wallet owns.
+
+        Args:
+            did: signing DID
+
+        Returns:
+            DIDInfo with new verification key and metadata for DID
+
+        """
+        try:
+            await indy.did.replace_keys_apply(self.handle, did)
+        except IndyError as x_indy:
+            if x_indy.error_code == ErrorCode.WalletItemNotFound:
+                raise WalletNotFoundError("Wallet owns no such DID: {}".format(did))
+            raise IndyErrorHandler.wrap_error(
+                x_indy, "Wallet {} error".format(self.name), WalletError
+            ) from x_indy
+
     async def create_local_did(
         self, seed: str = None, did: str = None, metadata: dict = None
     ) -> DIDInfo:
@@ -362,7 +433,7 @@ class IndyWallet(BaseWallet):
         Create and store a new local DID.
 
         Args:
-            seed: Optional seed to use for did
+            seed: Optional seed to use for DID
             did: The DID to use
             metadata: Metadata to store with DID
 
@@ -421,7 +492,7 @@ class IndyWallet(BaseWallet):
         Find info for a local DID.
 
         Args:
-            did: The DID to get info for
+            did: The DID for which to get info
 
         Returns:
             A `DIDInfo` instance representing the found DID
@@ -452,7 +523,7 @@ class IndyWallet(BaseWallet):
         Resolve a local DID from a verkey.
 
         Args:
-            verkey: The verkey to get the local DID for
+            verkey: The verkey for which to get the local DID
 
         Returns:
             A `DIDInfo` instance representing the found DID
@@ -473,13 +544,53 @@ class IndyWallet(BaseWallet):
         Replace metadata for a local DID.
 
         Args:
-            did: The DID to replace metadata for
+            did: The DID for which to replace metadata
             metadata: The new metadata
 
         """
         meta_json = json.dumps(metadata or {})
         await self.get_local_did(did)  # throw exception if undefined
         await indy.did.set_did_metadata(self.handle, did, meta_json)
+
+    async def set_did_endpoint(
+        self,
+        did: str,
+        endpoint: str,
+        ledger: BaseLedger,
+        endpoint_type: EndpointType = None,
+    ):
+        """
+        Update the endpoint for a DID in the wallet, send to ledger if public or posted.
+
+        Args:
+            did: DID for which to set endpoint
+            endpoint: the endpoint to set, None to clear
+            ledger: the ledger to which to send endpoint update if
+                DID is public or posted
+            endpoint_type: the type of the endpoint/service. Only endpoint_type
+                'endpoint' affects local wallet
+        """
+        did_info = await self.get_local_did(did)
+        metadata = {**did_info.metadata}
+        if not endpoint_type:
+            endpoint_type = EndpointType.ENDPOINT
+        if endpoint_type == EndpointType.ENDPOINT:
+            metadata[endpoint_type.indy] = endpoint
+
+        wallet_public_didinfo = await self.get_public_did()
+        if (
+            wallet_public_didinfo and wallet_public_didinfo.did == did
+        ) or did_info.metadata.get("posted"):
+            # if DID on ledger, set endpoint there first
+            if not ledger:
+                raise LedgerConfigError(
+                    f"No ledger available but DID {did} is public: missing wallet-type?"
+                )
+            if not ledger.read_only:
+                async with ledger:
+                    await ledger.update_endpoint_for_did(did, endpoint, endpoint_type)
+
+        await self.replace_local_did_metadata(did, metadata)
 
     async def sign_message(self, message: bytes, from_verkey: str) -> bytes:
         """
@@ -554,8 +665,8 @@ class IndyWallet(BaseWallet):
 
         Args:
             message: The message to pack
-            to_verkeys: List of verkeys to pack for
-            from_verkey: Sender verkey to pack from
+            to_verkeys: List of verkeys for which to pack
+            from_verkey: Sender verkey from which to pack
 
         Returns:
             The resulting packed message bytes
@@ -604,52 +715,6 @@ class IndyWallet(BaseWallet):
         to_verkey = unpacked.get("recipient_verkey", None)
         from_verkey = unpacked.get("sender_verkey", None)
         return message, from_verkey, to_verkey
-
-    async def get_credential_definition_tag_policy(self, credential_definition_id: str):
-        """Return the tag policy for a given credential definition ID."""
-        try:
-            policy_json = await indy.anoncreds.prover_get_credential_attr_tag_policy(
-                self.handle, credential_definition_id
-            )
-        except IndyError as x_indy:
-            raise IndyErrorHandler.wrap_error(
-                x_indy, "Wallet {} error".format(self.name), WalletError
-            ) from x_indy
-
-        return json.loads(policy_json) if policy_json else None
-
-    async def set_credential_definition_tag_policy(
-        self,
-        credential_definition_id: str,
-        taggables: Sequence[str] = None,
-        retroactive: bool = True,
-    ):
-        """
-        Set the tag policy for a given credential definition ID.
-
-        Args:
-            credential_definition_id: The ID of the credential definition
-            taggables: A sequence of string values representing attribute names;
-                empty array for none, None for all
-            retroactive: Whether to apply the policy to previously-stored credentials
-        """
-
-        self.logger.info(
-            "%s tagging policy: %s",
-            "Clear" if taggables is None else "Set",
-            credential_definition_id,
-        )
-        try:
-            await indy.anoncreds.prover_set_credential_attr_tag_policy(
-                self.handle,
-                credential_definition_id,
-                json.dumps(taggables),
-                retroactive,
-            )
-        except IndyError as x_indy:
-            raise IndyErrorHandler.wrap_error(
-                x_indy, "Wallet {} error".format(self.name), WalletError
-            ) from x_indy
 
     @classmethod
     async def generate_wallet_key(self, seed: str = None) -> str:

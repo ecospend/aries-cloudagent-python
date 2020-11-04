@@ -112,7 +112,7 @@ async def main(start_port: int, show_timing: bool = False):
 
         # Create a schema
         log_status("#3 Create a new schema on the ledger")
-        with log_timer("Publish schema duration:"):
+        with log_timer("Publish schema and cred def duration:"):
             pass
             # TODO define schema
             # version = format(
@@ -152,6 +152,7 @@ async def main(start_port: int, show_timing: bool = False):
             "(1) Issue Credential, (2) Send Proof Request, "
             + "(3) Send Message (X) Exit? [1/2/3/X] "
         ):
+            option = option.strip()
             if option in "xX":
                 break
 

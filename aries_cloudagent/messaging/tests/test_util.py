@@ -24,6 +24,9 @@ class TestUtil(TestCase):
             "2019-05-17 20:51:19.519437Z": datetime(
                 2019, 5, 17, 20, 51, 19, 519437, tzinfo=timezone.utc
             ),
+            "2019-05-17 20:51:19.519437001Z": datetime(
+                2019, 5, 17, 20, 51, 19, 519437, tzinfo=timezone.utc
+            ),
             "2019-05-17 20:51:19Z": datetime(
                 2019, 5, 17, 20, 51, 19, 0, tzinfo=timezone.utc
             ),
@@ -103,7 +106,10 @@ class TestUtil(TestCase):
                 "encoded": "99769404535520360775991420569103450442789945655240760487761322098828903685777",
             },
             "bool True": {"raw": True, "encoded": "1"},
-            "bool False": {"raw": False, "encoded": "0",},
+            "bool False": {
+                "raw": False,
+                "encoded": "0",
+            },
             "str True": {
                 "raw": "True",
                 "encoded": "27471875274925838976481193902417661171675582237244292940724984695988062543640",

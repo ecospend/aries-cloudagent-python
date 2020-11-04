@@ -22,14 +22,16 @@ class TestProvider(AsyncTestCase):
     @async_mock.patch("indy.pool.create_pool_ledger_config")
     @async_mock.patch("builtins.open")
     async def test_provide(
-        self, mock_open, mock_create_ledger_config,
+        self,
+        mock_open,
+        mock_create_ledger_config,
     ):
         mock_open.return_value = async_mock.MagicMock()
         provider = LedgerProvider()
 
         context = InjectionContext(enforce_typing=False)
         mock_wallet = async_mock.MagicMock()
-        mock_wallet.WALLET_TYPE = "indy"
+        mock_wallet.type = "indy"
         context.injector.bind_instance(BaseWallet, mock_wallet)
 
         result = await provider.provide(
@@ -53,10 +55,13 @@ class TestProvider(AsyncTestCase):
 
         context = InjectionContext(enforce_typing=False)
         mock_wallet = async_mock.MagicMock()
-        mock_wallet.WALLET_TYPE = "indy"
+        mock_wallet.type = "indy"
         context.injector.bind_instance(BaseWallet, mock_wallet)
 
         result = await provider.provide(
-            settings={"ledger.pool_name": "name",}, injector=context.injector
+            settings={
+                "ledger.pool_name": "name",
+            },
+            injector=context.injector,
         )
         assert result is None

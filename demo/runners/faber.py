@@ -6,13 +6,14 @@ import random
 import sys
 import time
 
+from qrcode import QRCode
+
 from aiohttp import ClientError
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa
 
 from runners.support.agent import DemoAgent, default_genesis_txns
 from runners.support.utils import (
-    log_json,
     log_msg,
     log_status,
     log_timer,
@@ -21,25 +22,29 @@ from runners.support.utils import (
     require_indy,
 )
 
-CRED_PREVIEW_TYPE = (
-    "did:sov:BzCbsNYhMrjHiqZDTUASHg;spec/issue-credential/1.0/credential-preview"
-)
+CRED_PREVIEW_TYPE = "https://didcomm.org/issue-credential/1.0/credential-preview"
 SELF_ATTESTED = os.getenv("SELF_ATTESTED")
 
 LOGGER = logging.getLogger(__name__)
 
-TAILS_FILE_COUNT = int(os.getenv("TAILS_FILE_COUNT", 20))
+TAILS_FILE_COUNT = int(os.getenv("TAILS_FILE_COUNT", 100))
 
 
 class FaberAgent(DemoAgent):
     def __init__(
-        self, http_port: int, admin_port: int, no_auto: bool = False, **kwargs
+        self,
+        http_port: int,
+        admin_port: int,
+        no_auto: bool = False,
+        tails_server_base_url: str = None,
+        **kwargs,
     ):
         super().__init__(
             "Faber.Agent",
             http_port,
             admin_port,
             prefix="Faber",
+            tails_server_base_url=tails_server_base_url,
             extra_args=[]
             if no_auto
             else ["--auto-accept-invites", "--auto-accept-requests"],
@@ -77,7 +82,8 @@ class FaberAgent(DemoAgent):
 
         self.log(
             "Credential: state = {}, credential_exchange_id = {}".format(
-                state, credential_exchange_id,
+                state,
+                credential_exchange_id,
             )
         )
 
@@ -125,8 +131,7 @@ class FaberAgent(DemoAgent):
             log_status("#27 Process the proof provided by X")
             log_status("#28 Check if proof is valid")
             proof = await self.admin_POST(
-                f"/present-proof/records/{presentation_exchange_id}/"
-                "verify-presentation"
+                f"/present-proof/records/{presentation_exchange_id}/verify-presentation"
             )
             self.log("Proof =", proof["verified"])
 
@@ -138,6 +143,7 @@ async def main(
     start_port: int,
     no_auto: bool = False,
     revocation: bool = False,
+    tails_server_base_url: str = None,
     show_timing: bool = False,
 ):
 
@@ -155,6 +161,7 @@ async def main(
             start_port + 1,
             genesis_data=genesis,
             no_auto=no_auto,
+            tails_server_base_url=tails_server_base_url,
             timing=show_timing,
         )
         await agent.listen_webhooks(start_port + 2)
@@ -184,16 +191,8 @@ async def main(
                 version,
                 ["name", "date", "degree", "age", "timestamp"],
                 support_revocation=revocation,
+                revocation_registry_size=TAILS_FILE_COUNT if revocation else None,
             )
-
-        if revocation:
-            with log_timer("Publish revocation registry duration:"):
-                log_status(
-                    "#5/6 Create and publish the revocation registry on the ledger"
-                )
-                await agent.create_and_publish_revocation_registry(
-                    credential_definition_id, TAILS_FILE_COUNT
-                )
 
         # TODO add an additional credential for Student ID
 
@@ -205,10 +204,17 @@ async def main(
             connection = await agent.admin_POST("/connections/create-invitation")
 
         agent.connection_id = connection["connection_id"]
-        log_json(connection, label="Invitation response:")
-        log_msg("*****************")
-        log_msg(json.dumps(connection["invitation"]), label="Invitation:", color=None)
-        log_msg("*****************")
+
+        qr = QRCode()
+        qr.add_data(connection["invitation_url"])
+        log_msg(
+            "Use the following JSON to accept the invite from another demo agent."
+            " Or use the QR code to connect from a mobile agent."
+        )
+        log_msg(
+            json.dumps(connection["invitation"]), label="Invitation Data:", color=None
+        )
+        qr.print_ascii(invert=True)
 
         log_msg("Waiting for connection...")
         await agent.detect_connection()
@@ -220,16 +226,15 @@ async def main(
             "    (3) Send Message\n"
         )
         if revocation:
-            options += (
-                "    (4) Revoke Credential\n"
-                "    (5) Publish Revocations\n"
-                "    (6) Add Revocation Registry\n"
-            )
+            options += "    (4) Revoke Credential\n" "    (5) Publish Revocations\n"
         options += "    (T) Toggle tracing on credential/proof exchange\n"
         options += "    (X) Exit?\n[1/2/3/{}T/X] ".format(
             "4/5/6/" if revocation else ""
         )
         async for option in prompt_loop(options):
+            if option is not None:
+                option = option.strip()
+
             if option is None or option in "xX":
                 break
 
@@ -268,7 +273,6 @@ async def main(
                     "trace": exchange_tracing,
                 }
                 await agent.admin_POST("/issue-credential/send-offer", offer_request)
-
                 # TODO issue an additional credential for Student ID
 
             elif option == "2":
@@ -291,7 +295,9 @@ async def main(
                     )
                 if SELF_ATTESTED:
                     # test self-attested claims
-                    req_attrs.append({"name": "self_attested_thing"},)
+                    req_attrs.append(
+                        {"name": "self_attested_thing"},
+                    )
                 req_preds = [
                     # test zero-knowledge proofs
                     {
@@ -312,6 +318,7 @@ async def main(
                         for req_pred in req_preds
                     },
                 }
+
                 if revocation:
                     indy_proof_request["non_revoked"] = {"to": int(time.time())}
                 proof_request_web_request = {
@@ -329,39 +336,34 @@ async def main(
                     f"/connections/{agent.connection_id}/send-message", {"content": msg}
                 )
             elif option == "4" and revocation:
-                rev_reg_id = await prompt("Enter revocation registry ID: ")
-                cred_rev_id = await prompt("Enter credential revocation ID: ")
-                publish = json.dumps(
-                    await prompt("Publish now? [Y/N]: ", default="N") in ("yY")
-                )
+                rev_reg_id = (await prompt("Enter revocation registry ID: ")).strip()
+                cred_rev_id = (await prompt("Enter credential revocation ID: ")).strip()
+                publish = (
+                    await prompt("Publish now? [Y/N]: ", default="N")
+                ).strip() in "yY"
                 try:
                     await agent.admin_POST(
-                        "/issue-credential/revoke"
-                        f"?publish={publish}"
-                        f"&rev_reg_id={rev_reg_id}"
-                        f"&cred_rev_id={cred_rev_id}"
+                        "/revocation/revoke",
+                        {
+                            "rev_reg_id": rev_reg_id,
+                            "cred_rev_id": cred_rev_id,
+                            "publish": publish,
+                        },
                     )
                 except ClientError:
                     pass
             elif option == "5" and revocation:
                 try:
-                    resp = await agent.admin_POST(
-                        "/issue-credential/publish-revocations"
-                    )
+                    resp = await agent.admin_POST("/revocation/publish-revocations", {})
                     agent.log(
                         "Published revocations for {} revocation registr{} {}".format(
-                            len(resp["results"]),
-                            "y" if len(resp) == 1 else "ies",
-                            json.dumps([k for k in resp["results"]], indent=4),
+                            len(resp["rrid2crid"]),
+                            "y" if len(resp["rrid2crid"]) == 1 else "ies",
+                            json.dumps([k for k in resp["rrid2crid"]], indent=4),
                         )
                     )
                 except ClientError:
                     pass
-            elif option == "6" and revocation:
-                log_status("#19 Add another revocation registry")
-                await agent.create_and_publish_revocation_registry(
-                    credential_definition_id, TAILS_FILE_COUNT
-                )
 
         if show_timing:
             timing = await agent.fetch_timing()
@@ -400,6 +402,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--revocation", action="store_true", help="Enable credential revocation"
     )
+
+    parser.add_argument(
+        "--tails-server-base-url",
+        type=str,
+        metavar=("<tails-server-base-url>"),
+        help="Tals server base url",
+    )
+
     parser.add_argument(
         "--timing", action="store_true", help="Enable timing information"
     )
@@ -435,9 +445,22 @@ if __name__ == "__main__":
 
     require_indy()
 
+    tails_server_base_url = args.tails_server_base_url or os.getenv("PUBLIC_TAILS_URL")
+
+    if args.revocation and not tails_server_base_url:
+        raise Exception(
+            "If revocation is enabled, --tails-server-base-url must be provided"
+        )
+
     try:
         asyncio.get_event_loop().run_until_complete(
-            main(args.port, args.no_auto, args.revocation, args.timing)
+            main(
+                args.port,
+                args.no_auto,
+                args.revocation,
+                tails_server_base_url,
+                args.timing,
+            )
         )
     except KeyboardInterrupt:
         os._exit(1)
