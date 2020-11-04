@@ -4,6 +4,7 @@ from abc import ABC, ABCMeta, abstractmethod
 from typing import Tuple, Union
 
 from ..core.error import BaseError
+from ..ledger.base import BaseLedger
 
 
 class HolderError(BaseError):
@@ -30,6 +31,18 @@ class BaseHolder(ABC, metaclass=ABCMeta):
 
         Args:
             credential_id: Credential id to retrieve
+
+        """
+
+    @abstractmethod
+    async def credential_revoked(
+        self, credential_id: str, ledger: BaseLedger, fro: int = None, to: int = None
+    ) -> bool:
+        """
+        Check ledger for revocation status of credential by cred id.
+
+        Args:
+            credential_id: Credential id to check
 
         """
 

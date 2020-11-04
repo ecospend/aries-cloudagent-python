@@ -332,7 +332,9 @@ class AttachDecoratorData(BaseModel):
         return getattr(self, "sha256_", None)
 
     async def sign(
-        self, verkeys: Union[str, Sequence[str]], wallet: BaseWallet,
+        self,
+        verkeys: Union[str, Sequence[str]],
+        wallet: BaseWallet,
     ):
         """
         Sign base64 data value of attachment.
@@ -654,10 +656,11 @@ class AttachDecoratorSchema(BaseModelSchema):
     filename = fields.Str(
         description="File name", example="IMG1092348.png", required=False
     )
-    byte_count = fields.Integer(
+    byte_count = fields.Int(
         description="Byte count of data included by reference",
         example=1234,
         required=False,
+        strict=True,
     )
     lastmod_time = fields.Str(
         description="Hint regarding last modification datetime, in ISO-8601 format",
@@ -669,4 +672,7 @@ class AttachDecoratorSchema(BaseModelSchema):
         example="view from doorway, facing east, with lights off",
         required=False,
     )
-    data = fields.Nested(AttachDecoratorDataSchema, required=True,)
+    data = fields.Nested(
+        AttachDecoratorDataSchema,
+        required=True,
+    )
