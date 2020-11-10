@@ -1,5 +1,8 @@
 """Delete response of pickup messages."""
 
+from marshmallow import fields
+from typing import Sequence
+
 from ....messaging.agent_message import AgentMessage, AgentMessageSchema
 
 from ..message_types import DELETE_PICKUP_RESPONSE, PROTOCOL_PACKAGE
@@ -22,7 +25,7 @@ class DeletePickupResponse(AgentMessage):
     def __init__(
         self,
         *,
-        message_ids = Sequence[str] = None,
+        message_ids : Sequence[str] = None,
         **kwargs
         ):
         """Initialize pickup delete response object."""
