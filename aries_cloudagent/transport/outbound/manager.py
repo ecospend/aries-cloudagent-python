@@ -444,9 +444,21 @@ class OutboundTransportManager:
         if completed.exc_info:
             queued.error = completed.exc_info
 
-            if queued.retries:
+            if queued.transport_id == "PushTransport":
+                pickup_manager = PickupManager(self.context)
+                queued.task = self.task_queue.run(
+                    pickup_manager.store_pickup_message(
+                        message=json.loads(queued.payload),
+                        verkey=queued.target.recipient_keys[0],
+                        endpoint=queued.target.endpoint,
+                        target_did=queued.target.did
+                    )
+                )
+                queued.state = QueuedOutboundMessage.STATE_DONE
+                queued.error = None
+            elif queued.retries:
                 if LOGGER.isEnabledFor(logging.DEBUG):
-                    LOGGER.error(
+                     LOGGER.error(
                         (
                             ">>> Error when posting to: %s; "
                             "Error: %s; "
