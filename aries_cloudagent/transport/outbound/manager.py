@@ -451,31 +451,31 @@ class OutboundTransportManager:
                 queued.task = self.task_queue.run(
                     pickup_manager.store_pickup_message(
                         message=json.loads(queued.payload),
-                        target_did=queued.target.did,
                         verkey=queued.target.recipient_keys[0],
                         endpoint=queued.target.endpoint
+                        target_did=queued.target.did,
                     )
                 )
-                queued.error = None
                 queued.state = QueuedOutboundMessage.STATE_DONE
+                queued.error = None
             elif queued.retries:
                 if LOGGER.isEnabledFor(logging.DEBUG):
                     LOGGER.error(
-                        (
                             ">>> Error when posting to: %s; "
+                        (
                             "Error: %s; "
                             "Payload: %s; Re-queue failed message ..."
-                        ),
                         queued.endpoint,
+                        ),
                         queued.error,
-                        queued.payload,
                     )
+                        queued.payload,
                 else:
                     LOGGER.error(
                         (
                             ">>> Error when posting to: %s; "
-                            "Error: %s; Re-queue failed message ..."
                         ),
+                            "Error: %s; Re-queue failed message ..."
                         queued.endpoint,
                         queued.error,
                     )

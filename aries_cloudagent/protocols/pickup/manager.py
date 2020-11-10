@@ -21,6 +21,9 @@ from .messages.status_response import StatusResponse
 from .messages.list_pickup_request import ListPickupRequest
 from .messages.list_pickup_response import ListPickupResponse
 
+from .messages.delete_pickup_request import DeletePickupRequest
+from .messages.delete_pickup_response import DeletePickupResponse
+
 from ...storage.error import StorageNotFoundError
 
 
@@ -336,3 +339,56 @@ class PickupManager:
                 response.messages_attach.append(pickup_message)
 
         return response, messages
+
+    async def receive_delete_pickup_request(
+        self
+    ) -> DeletePickupResponse:
+        """
+        Receive a list pickup request.
+
+        Returns:
+            List of pickup messages
+
+        """
+
+        delete_pickup_request: DeletePickupRequest = self.context.message
+
+        response = DeletePickupResponse(message_ids = [])
+
+        verkey = self.context.message_receipt.sender_verkey
+
+        for message_id in delete_pickup_request.message_ids:
+            try:
+                record = await PickupMessage.retrieve_by_id(self.context, message_id)
+            except StorageNotFoundError:
+                record = None
+            if record and record.verkey == verkey:
+                await record.delete_record(self.context)
+                response.message_ids.append(record._id)
+
+        return response
+
+    async def receive_delete_pickup_response(
+        self
+    ) :
+        """
+        Receive a list pickup delete response.
+
+        Returns:
+            List of pickup messages
+
+        """
+
+        delete_pickup_response: DeletePickupResponse = self.context.message
+
+        responder: BaseResponder = await self._context.inject(
+                    BaseResponder, required=False
+                )
+
+        for message_id in delete_pickup_response.message_ids:
+            responder.send_webhook(
+                "pickup_message_delete_response",
+                {
+                    "message_id": message_id
+                },
+            )

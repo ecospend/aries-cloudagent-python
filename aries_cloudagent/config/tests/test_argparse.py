@@ -44,6 +44,8 @@ class TestArgParse(AsyncTestCase):
                 "5",
                 "--outbound-transport",
                 "push",
+                "--push-api-key",
+                "api-key_test_value"
             ]
         )
 
@@ -53,9 +55,10 @@ class TestArgParse(AsyncTestCase):
         settings = group.get_settings(result)
 
         assert settings.get("transport.inbound_configs") == [["http", "0.0.0.0", "80"]]
-        assert settings.get("transport.outbound_configs") == ["http", "push"]
         assert settings.get("transport.outbound_configs") == ["http"]
         assert result.max_outbound_retry == 5
+        assert settings.get("transport.outbound_configs") == ["http", "push"]
+        assert settings.get("transport.push_api_key") == "api-key_test_value"
 
     async def test_general_settings_file(self):
         """Test file argument parsing."""

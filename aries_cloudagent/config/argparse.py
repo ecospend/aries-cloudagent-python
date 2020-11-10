@@ -835,6 +835,14 @@ class TransportGroup(ArgumentGroup):
             messages. Increasing this number might cause to increase the\
             accumulated messages in message queue. Default value is 4.",
         )
+        parser.add_argument(
+            "--push-api-key",
+            dest="push_api_key",
+            type=str,
+            help="Defines the push notification api key for push notification\
+            outbound transport for connections which are use push transport\
+            chanel.",
+        )
 
     def get_settings(self, args: Namespace):
         """Extract transport settings."""
