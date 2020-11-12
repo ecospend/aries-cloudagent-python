@@ -55,6 +55,7 @@ class TestArgParse(AsyncTestCase):
         settings = group.get_settings(result)
 
         assert settings.get("transport.inbound_configs") == [["http", "0.0.0.0", "80"]]
+        assert settings.get("transport.outbound_configs") == ["http", "push"]
         assert settings.get("transport.outbound_configs") == ["http"]
         assert result.max_outbound_retry == 5
         assert settings.get("transport.outbound_configs") == ["http", "push"]

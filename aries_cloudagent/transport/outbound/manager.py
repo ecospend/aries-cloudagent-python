@@ -452,8 +452,8 @@ class OutboundTransportManager:
                     pickup_manager.store_pickup_message(
                         message=json.loads(queued.payload),
                         verkey=queued.target.recipient_keys[0],
-                        endpoint=queued.target.endpoint
-                        target_did=queued.target.did,
+                        endpoint=queued.target.endpoint,
+                        target_did=queued.target.did
                     )
                 )
                 queued.state = QueuedOutboundMessage.STATE_DONE
@@ -461,21 +461,21 @@ class OutboundTransportManager:
             elif queued.retries:
                 if LOGGER.isEnabledFor(logging.DEBUG):
                     LOGGER.error(
-                            ">>> Error when posting to: %s; "
                         (
+                            ">>> Error when posting to: %s; "
                             "Error: %s; "
                             "Payload: %s; Re-queue failed message ..."
-                        queued.endpoint,
                         ),
+                        queued.endpoint,
                         queued.error,
-                    )
                         queued.payload,
+                    )
                 else:
                     LOGGER.error(
                         (
                             ">>> Error when posting to: %s; "
-                        ),
                             "Error: %s; Re-queue failed message ..."
+                        ),
                         queued.endpoint,
                         queued.error,
                     )

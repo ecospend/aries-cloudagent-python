@@ -27,8 +27,8 @@ class PushTransport(BaseOutboundTransport):
         self.dry_run = False
         self.apns_config = messaging.APNSConfig(
             headers={
-                "apns-priority": "10",
-                "apns-push-type": "background"
+                "apns-priority":"5",
+                "apns-push-type":"background",
             },
             payload=messaging.APNSPayload(
                 aps=messaging.Aps(
@@ -76,10 +76,7 @@ class PushTransport(BaseOutboundTransport):
             agent_message = messaging.Message(
                 data=data_message,
                 apns=self.apns_config,
-                token=push_id,
-                notification=messaging.Notification(
-                    body="You've received new message"
-                )
+                token=push_id
             )
             try:
                 result = messaging.send(message=agent_message, dry_run=self.dry_run)
