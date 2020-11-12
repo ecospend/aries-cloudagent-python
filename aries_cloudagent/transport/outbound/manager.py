@@ -458,7 +458,7 @@ class OutboundTransportManager:
                 queued.error = None
             elif queued.retries:
                 if LOGGER.isEnabledFor(logging.DEBUG):
-                     LOGGER.error(
+                    LOGGER.error(
                         (
                             ">>> Error when posting to: %s; "
                             "Error: %s; "
