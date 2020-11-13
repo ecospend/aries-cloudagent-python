@@ -35,5 +35,3 @@ class ListPickupHandler(BaseHandler):
         pickup_manager = PickupManager(context)
         response, pickup_messages = await pickup_manager.receive_list_request()
         await responder.send_reply(response)
-        for message in pickup_messages :
-            await message.set_delivered(context=context)
