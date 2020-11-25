@@ -352,6 +352,7 @@ class PickupManager:
         delete_pickup_request: DeletePickupRequest = self.context.message
 
         response = DeletePickupResponse(message_ids = [])
+        response.message_ids = []
 
         verkey = self.context.message_receipt.sender_verkey
 
